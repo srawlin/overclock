@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# fastcode — pi-coding-agent harness tuned for Cerebras (small-context model, fast inference)
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Separate agent state (sessions, auth, settings) from a stock pi install.
+export PI_CODING_AGENT_DIR="${FASTCODE_AGENT_DIR:-$HOME/.fastcode/agent}"
+mkdir -p "$PI_CODING_AGENT_DIR"
+
+# First-run defaults; user-editable afterwards.
+if [ ! -f "$PI_CODING_AGENT_DIR/settings.json" ]; then
+	cat > "$PI_CODING_AGENT_DIR/settings.json" <<'JSON'
+{
+  "defaultProvider": "cerebras",
+  "defaultModel": "cerebras/qwen-3.8-27b",
+  "defaultThinkingLevel": "low",
+  "quietStartup": true
+}
+JSON
+fi
+
+# API key: existing env wins, else source ~/.config/fastcode/env, else .env in cwd.
+if [ -z "${CEREBRAS_API_KEY:-}" ]; then
+	if [ -f "$HOME/.config/fastcode/env" ]; then
+		set -a; . "$HOME/.config/fastcode/env"; set +a
+	elif [ -f "./.env" ]; then
+		set -a; . "./.env"; set +a
+	fi
+fi
+
+exec pi \
+	--extension "$HERE/extensions/fastcode" \
+	--model "${FASTCODE_MODEL:-cerebras/qwen-3.8-27b}" \
+	--tools read,write,edit,bash,grep,find,ls,explore,delegate \
+	"$@"
