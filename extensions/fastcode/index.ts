@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent"
 import { installContextBudget } from "./context-budget"
+import { installProviderTuning } from "./provider-tuning"
 import { CEREBRAS_MODELS } from "./model"
 import { FASTCODE_GUIDANCE } from "./prompt"
 import { registerSubAgentTools } from "./subagents"
@@ -14,16 +15,23 @@ export default function fastcode(pi: ExtensionAPI) {
 	})
 
 	installContextBudget(pi)
+	installProviderTuning(pi)
 	registerSubAgentTools(pi)
 
 	// FASTCODE_DEBUG=1 logs the outgoing request size each turn.
 	pi.on("before_provider_request", (event) => {
 		if (!process.env.FASTCODE_DEBUG) return
-		const payload = event.payload as { messages?: unknown[] }
+		const p = event.payload as Record<string, unknown> & { messages?: { role?: string; reasoning?: string }[] }
+		const reasoningChars = (p.messages ?? []).reduce(
+			(sum, m) => sum + (typeof m.reasoning === "string" ? m.reasoning.length : 0),
+			0,
+		)
 		console.error(
-			`[fastcode] request: ${payload.messages?.length ?? "?"} messages, ~${Math.round(
-				JSON.stringify(payload).length / 4,
-			)} tokens`,
+			`[fastcode] request: ${p.messages?.length ?? "?"} messages, ~${Math.round(
+				JSON.stringify(p).length / 4,
+			)} tokens | max_completion_tokens=${p.max_completion_tokens ?? p.max_tokens ?? "unset"} reasoning_effort=${
+				p.reasoning_effort ?? "unset"
+			} clear_thinking=${p.clear_thinking ?? "unset"} history_reasoning~${Math.round(reasoningChars / 4)}tok`,
 		)
 	})
 
