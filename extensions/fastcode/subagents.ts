@@ -9,6 +9,9 @@ import {
 	type ExtensionContext,
 } from "@mariozechner/pi-coding-agent"
 import { Type } from "typebox"
+import { pruneContext } from "./context-budget"
+import { logMetrics } from "./metrics"
+import { paceRequest } from "./provider-tuning"
 
 // Cerebras enforces RPM and TPM per org. Sub-agents multiply request rate, so
 // cap concurrency — three in-flight sub-agents is plenty at ~1500 tok/s.
@@ -40,6 +43,8 @@ Finish with: what changed (files), how you verified it, and anything the caller 
 
 interface SubAgentDetails {
 	turns: number
+	inputTokens?: number
+	outputTokens?: number
 	error?: string
 }
 
@@ -49,6 +54,7 @@ function errorResult(text: string): AgentToolResult<SubAgentDetails> {
 
 async function runSubAgent(
 	ctx: ExtensionContext,
+	name: "explore" | "delegate",
 	task: string,
 	tools: "read-only" | "coding",
 	signal: AbortSignal | undefined,
@@ -61,6 +67,7 @@ async function runSubAgent(
 	if (!auth.apiKey) return errorResult(`no API key for provider ${model.provider}`)
 
 	await acquire()
+	const start = Date.now()
 	try {
 		const agent = new Agent({
 			initialState: {
@@ -69,7 +76,25 @@ async function runSubAgent(
 				tools: tools === "read-only" ? createReadOnlyTools(ctx.cwd) : createCodingTools(ctx.cwd),
 			},
 			convertToLlm,
-			streamFn: (m, c, o) => streamSimple(m, c, o),
+			// Same per-request pruning as the main loop — inner transcripts are
+			// disposable but still ride the wire every turn.
+			transformContext: async (messages) => pruneContext(messages).messages,
+			streamFn: (m, c, o) =>
+				streamSimple(m, c, {
+					...o,
+					// Inner requests bypass extension hooks, so the provider tuning
+					// has to be applied here: low reasoning, capped output
+					// reservation, clear_thinking, and shared TPM pacing.
+					reasoning: o?.reasoning ?? "low",
+					maxTokens: Math.min(o?.maxTokens ?? 16_384, 16_384),
+					onPayload: async (payload, _model) => {
+						const p = payload as Record<string, unknown>
+						if (typeof p.model === "string" && p.model.includes("qwen")) p.clear_thinking = true
+						const reserved = typeof p.max_completion_tokens === "number" ? p.max_completion_tokens : 16_384
+						await paceRequest(Math.ceil(JSON.stringify(p).length / 4) + reserved)
+						return p
+					},
+				}),
 			getApiKey: () => auth.apiKey,
 			toolExecution: "parallel",
 		})
@@ -95,9 +120,19 @@ async function runSubAgent(
 					.map((part) => part.text)
 					.join("\n")
 			: ""
+		let inputTokens = 0
+		let outputTokens = 0
+		for (const m of agent.state.messages) {
+			if (m.role === "assistant" && "usage" in m && m.usage) {
+				const u = m.usage as { input?: number; cacheRead?: number; output?: number }
+				inputTokens += (u.input ?? 0) + (u.cacheRead ?? 0)
+				outputTokens += u.output ?? 0
+			}
+		}
+		logMetrics({ kind: "subagent", name, turns, inputTokens, outputTokens, ms: Date.now() - start })
 		return {
 			content: [{ type: "text", text: text || "(sub-agent produced no output)" }],
-			details: { turns },
+			details: { turns, inputTokens, outputTokens },
 		}
 	} finally {
 		release()
@@ -121,6 +156,7 @@ export function registerSubAgentTools(pi: ExtensionAPI) {
 		execute: async (_toolCallId, params, signal, onUpdate, ctx) =>
 			runSubAgent(
 				ctx,
+				"explore",
 				params.files?.length ? `${params.task}\n\nFocus on: ${params.files.join(", ")}` : params.task,
 				"read-only",
 				signal,
@@ -142,6 +178,6 @@ export function registerSubAgentTools(pi: ExtensionAPI) {
 			task: Type.String({ description: "Complete task description, including acceptance criteria" }),
 		}),
 		execute: async (_toolCallId, params, signal, onUpdate, ctx) =>
-			runSubAgent(ctx, params.task, "coding", signal, onUpdate),
+			runSubAgent(ctx, "delegate", params.task, "coding", signal, onUpdate),
 	})
 }

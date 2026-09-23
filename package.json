@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "description": "Cerebras-tuned coding harness: pi-coding-agent + fastcode extension (context budget, sub-agents)",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
   "bin": {
     "fastcode": "bin/fastcode"
   },
