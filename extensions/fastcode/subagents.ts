@@ -2,6 +2,7 @@ import { Agent } from "@mariozechner/pi-agent-core"
 import { streamSimple, type TextContent } from "@mariozechner/pi-ai"
 import {
 	convertToLlm,
+	createBashTool,
 	createCodingTools,
 	createReadOnlyTools,
 	type AgentToolResult,
@@ -41,6 +42,10 @@ const DELEGATE_PROMPT = `You are a coding sub-agent in a CLI. Complete the given
 Rules: make the change, then verify it (run the relevant test/build/lint if one exists); keep your own searches targeted.
 Finish with: what changed (files), how you verified it, and anything the caller must know. Be terse.`
 
+const VERIFY_PROMPT = `You are an independent verification sub-agent in a coding CLI. You did NOT make the change under review — evaluate it skeptically.
+Rules: run the relevant tests/build/lint commands; inspect the actual diff or named files; check the change against the stated criteria, not just whether it runs.
+Finish with a verdict: PASS or FAIL, followed by concrete evidence (commands run, relevant output, file:line references). Never modify files — observation and commands only.`
+
 interface SubAgentDetails {
 	turns: number
 	inputTokens?: number
@@ -52,15 +57,28 @@ function errorResult(text: string): AgentToolResult<SubAgentDetails> {
 	return { content: [{ type: "text", text }], details: { turns: 0, error: text } }
 }
 
+type SubAgentName = "explore" | "delegate" | "verify"
+type Toolset = "read-only" | "coding" | "verify"
+
+/** Model routing per sub-agent role. FASTCODE_EXPLORE_MODEL overrides the
+ *  model used for explore agents (accepts "id" or "provider/id") — e.g.
+ *  gpt-oss-120b at ~4x cheaper input for what is fundamentally search work. */
+export function resolveSubAgentModel(ctx: ExtensionContext, name: SubAgentName) {
+	const override = name === "explore" ? process.env.FASTCODE_EXPLORE_MODEL : undefined
+	if (!override) return ctx.model
+	const [provider, id] = override.includes("/") ? override.split("/", 2) : ["cerebras", override]
+	return ctx.modelRegistry.find(provider, id) ?? ctx.model
+}
+
 async function runSubAgent(
 	ctx: ExtensionContext,
-	name: "explore" | "delegate",
+	name: SubAgentName,
 	task: string,
-	tools: "read-only" | "coding",
+	tools: Toolset,
 	signal: AbortSignal | undefined,
 	onUpdate: ((result: AgentToolResult<SubAgentDetails>) => void) | undefined,
 ): Promise<AgentToolResult<SubAgentDetails>> {
-	const model = ctx.model
+	const model = resolveSubAgentModel(ctx, name)
 	if (!model) return errorResult("no active model")
 	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model)
 	if (!auth.ok) return errorResult(`cannot resolve credentials: ${auth.error}`)
@@ -71,9 +89,17 @@ async function runSubAgent(
 	try {
 		const agent = new Agent({
 			initialState: {
-				systemPrompt: tools === "read-only" ? EXPLORE_PROMPT : DELEGATE_PROMPT,
+				systemPrompt:
+					tools === "read-only" ? EXPLORE_PROMPT : tools === "verify" ? VERIFY_PROMPT : DELEGATE_PROMPT,
 				model,
-				tools: tools === "read-only" ? createReadOnlyTools(ctx.cwd) : createCodingTools(ctx.cwd),
+				// verify: read-only inspection plus bash for tests/builds — it
+				// can check work but not change it.
+				tools:
+					tools === "read-only"
+						? createReadOnlyTools(ctx.cwd)
+						: tools === "verify"
+							? [...createReadOnlyTools(ctx.cwd), createBashTool(ctx.cwd)]
+							: createCodingTools(ctx.cwd),
 			},
 			convertToLlm,
 			// Same per-request pruning as the main loop — inner transcripts are
@@ -129,7 +155,7 @@ async function runSubAgent(
 				outputTokens += u.output ?? 0
 			}
 		}
-		logMetrics({ kind: "subagent", name, turns, inputTokens, outputTokens, ms: Date.now() - start })
+		logMetrics({ kind: "subagent", name, model: model.id, turns, inputTokens, outputTokens, ms: Date.now() - start })
 		return {
 			content: [{ type: "text", text: text || "(sub-agent produced no output)" }],
 			details: { turns, inputTokens, outputTokens },
@@ -173,11 +199,36 @@ export function registerSubAgentTools(pi: ExtensionAPI) {
 		promptGuidelines: [
 			"Prefer delegate for self-contained tasks (write tests for X, fix lint in Y) — its work stays out of your context.",
 			"Give delegate complete, unambiguous instructions; it cannot see your conversation.",
+			"When running delegates in parallel, give each a disjoint set of files — parallel tasks that share files will overwrite each other.",
 		],
 		parameters: Type.Object({
 			task: Type.String({ description: "Complete task description, including acceptance criteria" }),
 		}),
 		execute: async (_toolCallId, params, signal, onUpdate, ctx) =>
 			runSubAgent(ctx, "delegate", params.task, "coding", signal, onUpdate),
+	})
+
+	pi.registerTool({
+		name: "verify",
+		label: "Verify",
+		description:
+			"Spawn an independent verification sub-agent to check work you did not write. It runs tests/builds and inspects diffs, then returns PASS or FAIL with concrete evidence. Use after code changes when correctness matters — a fresh agent catches what you cannot see in your own work.",
+		promptSnippet: "verify — independent checker sub-agent (PASS/FAIL + evidence)",
+		promptGuidelines: [
+			"Use verify after completing code changes — a fresh agent catches what you cannot see in your own work.",
+		],
+		parameters: Type.Object({
+			task: Type.String({ description: "What to verify and the acceptance criteria" }),
+			files: Type.Optional(Type.Array(Type.String(), { description: "Files/diffs to check, if known" })),
+		}),
+		execute: async (_toolCallId, params, signal, onUpdate, ctx) =>
+			runSubAgent(
+				ctx,
+				"verify",
+				params.files?.length ? `${params.task}\n\nCheck: ${params.files.join(", ")}` : params.task,
+				"verify",
+				signal,
+				onUpdate,
+			),
 	})
 }

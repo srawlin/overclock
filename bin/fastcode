@@ -32,5 +32,5 @@ fi
 exec pi \
 	--extension "$HERE/extensions/fastcode" \
 	--model "${FASTCODE_MODEL:-cerebras/qwen-3.8-27b}" \
-	--tools read,write,edit,bash,grep,find,ls,explore,delegate \
+	--tools read,write,edit,bash,grep,find,ls,explore,delegate,verify \
 	"$@"
