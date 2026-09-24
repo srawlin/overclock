@@ -17,7 +17,12 @@ let sessionId = "unknown"
 
 export function initMetrics() {
 	if (file) return
-	const dir = join(process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent"), "logs")
+	const dir = join(
+		process.env.OVERCLOCK_CODING_AGENT_DIR ??
+			process.env.PI_CODING_AGENT_DIR ??
+			join(homedir(), ".overclock", "agent"),
+		"logs",
+	)
 	mkdirSync(dir, { recursive: true })
 	file = join(dir, `metrics-${new Date().toISOString().replace(/[:.]/g, "-")}-${process.pid}.jsonl`)
 }

@@ -4,6 +4,8 @@ Cerebras-tuned coding harness: a thin extension on `@earendil-works/pi-coding-ag
 
 Renamed from "fastcode" — user-facing surfaces (binary, `OVERCLOCK_*` env vars, `~/.overclock`, `~/.config/overclock`) use the new name; legacy `FASTCODE_*` env vars and paths are still honored via fallback.
 
+Pi runtime rebranding lives in `scripts/postinstall.mjs` (npm postinstall): it writes `piConfig` into pi's own package.json (its designed rebrand hook → `APP_NAME=overclock`, `OVERCLOCK_CODING_AGENT_DIR`) and string-patches a few literal "pi" strings in `dist/` that piConfig can't reach. Both are re-applied on every install and silently no-op if upstream changes. The model-facing system prompt is rebranded at runtime in `index.ts` (`before_agent_start` replace).
+
 ## Required workflow — tests, commit, push
 
 **After ANY code change, before telling the user it's done:**

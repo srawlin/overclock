@@ -8,7 +8,8 @@
     "test": "for f in test/*.test.ts; do bun \"$f\" || exit 1; done",
     "eval": "node test/eval/run.mjs",
     "eval:fast": "OVERCLOCK_FAST=1 node test/eval/run.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "postinstall": "node scripts/postinstall.mjs"
   },
   "bin": {
     "overclock": "bin/overclock"

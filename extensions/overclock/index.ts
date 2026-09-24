@@ -235,6 +235,8 @@ export default function overclock(pi: ExtensionAPI) {
 	})
 
 	pi.on("before_agent_start", (event) => ({
-		systemPrompt: `${event.systemPrompt}\n\n${OVERCLOCK_GUIDANCE}`,
+		// pi's stock preamble identifies the harness as "pi" — rebrand to
+		// overclock (the replace no-ops if upstream rewords the preamble).
+		systemPrompt: `${event.systemPrompt.replace("operating inside pi,", "operating inside overclock,")}\n\n${OVERCLOCK_GUIDANCE}`,
 	}))
 }

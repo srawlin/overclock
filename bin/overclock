@@ -10,12 +10,18 @@ if [ ! -d "$HOME/.overclock" ] && [ -d "$HOME/.fastcode" ]; then
 fi
 
 # Separate agent state (sessions, auth, settings) from a stock pi install.
-export PI_CODING_AGENT_DIR="${PI_CODING_AGENT_DIR:-${OVERCLOCK_AGENT_DIR:-${FASTCODE_AGENT_DIR:-$HOME/.overclock/agent}}}"
-mkdir -p "$PI_CODING_AGENT_DIR"
+# pi is rebranded via piConfig (scripts/postinstall.mjs): its agent-dir env var
+# is OVERCLOCK_CODING_AGENT_DIR. PI_CODING_AGENT_DIR and our own
+# OVERCLOCK_/FASTCODE_AGENT_DIR are honored as fallbacks; both names are
+# exported so pi and our metrics code agree on the resolved dir.
+AGENT_DIR="${OVERCLOCK_CODING_AGENT_DIR:-${PI_CODING_AGENT_DIR:-${OVERCLOCK_AGENT_DIR:-${FASTCODE_AGENT_DIR:-$HOME/.overclock/agent}}}}"
+export OVERCLOCK_CODING_AGENT_DIR="$AGENT_DIR"
+export PI_CODING_AGENT_DIR="$AGENT_DIR"
+mkdir -p "$AGENT_DIR"
 
 # First-run defaults; user-editable afterwards.
-if [ ! -f "$PI_CODING_AGENT_DIR/settings.json" ]; then
-	cat > "$PI_CODING_AGENT_DIR/settings.json" <<'JSON'
+if [ ! -f "$AGENT_DIR/settings.json" ]; then
+	cat > "$AGENT_DIR/settings.json" <<'JSON'
 {
   "defaultProvider": "cerebras",
   "defaultModel": "cerebras/qwen-3.8-27b",

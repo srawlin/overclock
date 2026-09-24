@@ -46,9 +46,11 @@ npm install
 ```bash
 overclock                # interactive TUI
 overclock -p "fix the failing test"   # print mode — one shot, stdout
+overclock -r             # resume your last session
+overclock --session <id> # resume a specific session (shown on exit)
 ```
 
-Exit with `/exit`, `/quit`, or Ctrl-D.
+Exit with `/exit`, `/quit`, or Ctrl-D — the session-resume hint printed on exit is already `overclock`-branded.
 
 ## Configuration
 
@@ -64,11 +66,13 @@ Exit with `/exit`, `/quit`, or Ctrl-D.
 | `OVERCLOCK_TEMPERATURE` | provider default | Sampling temperature for main-loop requests |
 | `OVERCLOCK_DEBUG` | off | Per-request wire-size stats to stderr |
 | `OVERCLOCK_API_BASE` | `api.cerebras.ai/v1` | Custom endpoint (proxy/gateway/test) |
-| `OVERCLOCK_AGENT_DIR` | `~/.overclock/agent` | Sessions, settings, metrics |
+| `OVERCLOCK_AGENT_DIR` | `~/.overclock/agent` | Sessions, settings, metrics. `OVERCLOCK_CODING_AGENT_DIR` / `PI_CODING_AGENT_DIR` also honored (pi's own vars) |
 
 > **Renamed from fastcode:** the legacy `FASTCODE_*` env vars, `~/.config/fastcode/env`, and `~/.fastcode/agent` are still honored — `~/.fastcode` is auto-migrated on first run and `OVERCLOCK_*` wins when both are set.
 
-**Update notices:** overclock is built on the [pi](https://github.com/earendil-works/pi) runtime (`@earendil-works/pi-coding-agent`). Pi's own "new version" banner is suppressed (it suggests `pi update`, which isn't on PATH); the extension shows an overclock-branded notice instead when a newer pi exists. Upgrade with `npm install @earendil-works/pi-coding-agent@latest` in this repo.
+**Update notices:** overclock is built on the [pi](https://github.com/earendil-works/pi) runtime (`@earendil-works/pi-coding-agent`). Pi's own "new version" banner is suppressed; the extension shows an overclock-branded notice instead when a newer pi exists. Upgrade with `npm install @earendil-works/pi-coding-agent@latest` in this repo.
+
+**Pi rebranding:** `scripts/postinstall.mjs` (runs on every `npm install`) writes `piConfig` into pi's `package.json` — pi's built-in rebrand hook — so its resume hint, `--help`, update and crash text all say `overclock`, and its agent-dir env var is `OVERCLOCK_CODING_AGENT_DIR`. It also patches two literals piConfig can't reach; the extension replaces `pi` in the system prompt at runtime. If a pi upgrade rewords those strings, they harmlessly revert to "pi".
 
 ## Metrics
 

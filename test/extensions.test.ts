@@ -81,12 +81,13 @@ delete process.env.FASTCODE_EXPLORE_MODEL
 // --- /exit command (regression: pi only ships /quit — /exit used to go to the model) ---
 process.env.PI_CODING_AGENT_DIR = mkdtempSync(join(tmpdir(), "overclock-ext-test-"))
 const commands: any[] = []
+const handlers: Record<string, (...args: any[]) => any> = {}
 const fakePiFull = {
 	registerTool: () => {},
 	registerCommand: (name: string, opts: any) => commands.push({ name, ...opts }),
 	registerProvider: () => {},
 	registerFlag: () => {},
-	on: () => {},
+	on: (event: string, h: (...args: any[]) => any) => (handlers[event] = h),
 	getFlag: () => undefined,
 } as any
 overclock(fakePiFull)
@@ -111,6 +112,15 @@ const joined = lines.join("\n")
 check("logo renders 5 art rows + tagline + padding", lines.length === 8)
 check("logo has italic ANSI on over", joined.includes("\x1b[3m") && joined.includes("\x1b[23m"))
 check("logo contains both words' glyphs", joined.includes("_____  _____") && joined.includes("\\___|_|"))
+
+// --- system prompt rebrands pi → overclock (model-facing identity) ---
+{
+	const res = handlers.before_agent_start?.({
+		systemPrompt: "You are an expert coding assistant operating inside pi, a coding agent harness.",
+	})
+	check("system prompt rebrands pi → overclock", res?.systemPrompt?.includes("operating inside overclock,") === true, JSON.stringify(res?.systemPrompt?.slice(0, 90)))
+	check("system prompt appends guidance", res?.systemPrompt?.includes("## Context budget") === true)
+}
 
 // --- version check ---
 check("newer minor detected", newerVersion("0.88.0", "0.87.1"))

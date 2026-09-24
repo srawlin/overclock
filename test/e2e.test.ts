@@ -49,6 +49,19 @@ function sse(): string {
 	check("--version prints something", ((r.stdout ?? "") + (r.stderr ?? "")).trim().length > 0)
 }
 
+// --- 1b. rebrand: --help addresses "overclock", pi's package.json is piConfig-patched ---
+{
+	const r = spawnSync(BIN, ["--help"], { encoding: "utf8", timeout: 20_000, stdio: ["ignore", "pipe", "pipe"] })
+	const help = `${r.stdout ?? ""}${r.stderr ?? ""}`
+	check("--help exits 0", r.status === 0)
+	check("--help brands as overclock", /(^|\s)overclock(\s|$)/m.test(help) && help.includes("OVERCLOCK_CODING_AGENT_DIR"))
+	check("--help has no stray 'pi' command refs", !/(^|\s)pi (--|-[a-zA-Z]|update|config|install)/m.test(help))
+	const piPkg = JSON.parse(
+		readFileSync(join(repoRoot, "node_modules", "@earendil-works", "pi-coding-agent", "package.json"), "utf8"),
+	)
+	check("pi package.json carries piConfig name", piPkg?.piConfig?.name === "overclock", JSON.stringify(piPkg?.piConfig))
+}
+
 // --- 2. full loop against mock SSE server ---
 const home = mkdtempSync(join(tmpdir(), "overclock-e2e-home-"))
 const agentDir = join(home, "agent")
