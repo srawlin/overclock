@@ -29,7 +29,23 @@ if [ -z "${CEREBRAS_API_KEY:-}" ]; then
 	fi
 fi
 
-exec pi \
+# pi needs node >= 20 on PATH; an nvm install may exist without being loaded
+# in this shell (e.g. GUI apps, cron, other terminals).
+NODE_MAJOR="$(node -p 'parseInt(process.version.slice(1))' 2>/dev/null || echo 0)"
+if [ "$NODE_MAJOR" -lt 20 ]; then
+	NEWEST="$(ls -d "$HOME"/.nvm/versions/node/*/bin 2>/dev/null | sort -V | tail -1)"
+	[ -n "$NEWEST" ] && export PATH="$NEWEST:$PATH"
+fi
+
+# Prefer the pinned dependency; fall back to a pi on PATH.
+PI="$HERE/node_modules/.bin/pi"
+[ -x "$PI" ] || PI="$(command -v pi || true)"
+if [ -z "$PI" ]; then
+	echo "fastcode: pi not found — run 'npm install' in $HERE or install @mariozechner/pi-coding-agent" >&2
+	exit 1
+fi
+
+exec "$PI" \
 	--extension "$HERE/extensions/fastcode" \
 	--model "${FASTCODE_MODEL:-cerebras/qwen-3.8-27b}" \
 	--tools read,write,edit,bash,grep,find,ls,explore,delegate,verify \
