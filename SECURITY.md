@@ -25,14 +25,14 @@ configured LLM endpoint. The three boundaries that matter:
 | ID  | Severity | Issue | Status |
 |-----|----------|-------|--------|
 | F1  | HIGH     | `bin/overclock` executes `./.env` from the cwd as shell code | **Fixed** |
-| F2  | HIGH     | `CEREBRAS_API_KEY` (and all env secrets) inherited by every agent-run command | Open |
+| F2  | HIGH     | `CEREBRAS_API_KEY` (and all env secrets) inherited by every agent-run command | **Fixed** (key) / residual noted |
 | F3  | MEDIUM   | Symlinked install resolves wrong root; falls back to PATH `pi` | **Fixed** |
 | F4  | MEDIUM   | Installer reads API key with terminal echo on | **Fixed** |
-| F5  | MEDIUM   | `OVERCLOCK_API_BASE` unvalidated — arbitrary/plain-HTTP endpoint | Open |
-| F6  | MEDIUM   | Agent state dir and transcripts created with default (world-readable) perms | Open |
-| F7  | MEDIUM   | `verify`/`delegate` sub-agent bash is unrestricted; "read-only" is prompt-only | Open |
-| F8  | MEDIUM   | No prompt-injection or untrusted-repo guardrails (documented risk) | Open |
-| F9  | MEDIUM   | Installer/update supply chain (`curl\|bash`, `npm install`, `reset --hard`) | Open |
+| F5  | MEDIUM   | `OVERCLOCK_API_BASE` unvalidated — arbitrary/plain-HTTP endpoint | **Fixed** |
+| F6  | MEDIUM   | Agent state dir and transcripts created with default (world-readable) perms | **Fixed** |
+| F7  | MEDIUM   | `verify`/`delegate` sub-agent bash is unrestricted; "read-only" is prompt-only | **Mitigated** (docs + `--safe`) |
+| F8  | MEDIUM   | No prompt-injection or untrusted-repo guardrails (documented risk) | **Fixed** (`--safe` + docs) |
+| F9  | MEDIUM   | Installer/update supply chain (`curl\|bash`, `npm install`, `reset --hard`) | **Fixed** (residual: unsigned tags) |
 | F10 | LOW      | `.env` not in `.gitignore` — API key committable | **Fixed** |
 | F11 | LOW      | `postinstall.mjs` mutates `node_modules` after npm integrity checks | Open |
 | F12 | LOW      | Version check phones home to pi.dev on every session start | Open |
@@ -92,6 +92,24 @@ Ordering also makes `./.env` the *last* file sourced, so it overrides the user's
   override `OVERCLOCK_API_BASE`/auth silently.
 
 ### F2 — `CEREBRAS_API_KEY` is exposed to every process the agent spawns
+
+**Status: FIXED (for the API key) — residual noted.** The provider now uses pi's
+`!command` apiKey form instead of `$CEREBRAS_API_KEY` env interpolation: at
+request time pi execs `if [ -n "$CEREBRAS_API_KEY" ]; … else cat
+$HOME/.config/overclock/key`, so the key resolves from a `0600` file. The
+launcher maintains that file (writes/refreshes it whenever a key is present,
+`0700` parent dir) and — once the file provably matches — `unset`s
+`CEREBRAS_API_KEY` before exec'ing pi, so **nothing the agent spawns inherits
+it**. If the file can't be written, the env var is kept and the `!command`'s
+env branch still resolves it (graceful degradation, never a hard break).
+
+Residual: other secrets in the user's shell env (`AWS_*`, `GITHUB_TOKEN`, …)
+still reach spawned commands — that env is the user's own and is what the
+commands need to function; blanket scrubbing was rejected (breaks legitimate
+env-dependent builds/deploys). A deliberate env-scrub via pi's `spawnHook`
+remains an option if a specific secret needs it. Tools that *want* the key can
+read `~/.config/overclock/key`. Verified e2e: key file written `0600`, `Bearer
+test-key` reaches the wire with the env var removed.
 
 **Location:** pi `dist/core/tools/bash.js` (`resolveSpawnContext`,
 `env ?? getShellEnv()`) and `dist/utils/shell.js` (`getShellEnv()` returns
@@ -183,6 +201,13 @@ already applied to the written file — keep that.
 
 ### F5 — `OVERCLOCK_API_BASE` accepts any endpoint, including plain HTTP
 
+**Status: FIXED.** `resolveApiBase()` in `index.ts` validates the override:
+`https://` required; `http://` accepted only for loopback hosts
+(`localhost`, `127.0.0.1`, `::1`) — covers the e2e mock. Anything else is
+refused with a loud stderr message and the default endpoint is used (fail
+closed: never send the key to an invalid endpoint). Unit-tested for
+https/loopback/refused/garbage/legacy-var cases.
+
 **Location:** `extensions/overclock/index.ts` line 65 —
 `baseUrl: envVar("API_BASE") ?? "https://api.cerebras.ai/v1"`.
 
@@ -195,6 +220,14 @@ loopback hosts (`127.0.0.1`, `::1`, `localhost`). Fail fast with a clear error
 otherwise.
 
 ### F6 — Agent state directory and session transcripts use default permissions
+
+**Status: FIXED.** `~/.overclock` and the agent dir are `chmod 700` on launch;
+the metrics `logs/` dir is `chmod 700` at creation (contents inside a `700`
+dir are unreachable to other users regardless of file mode). `install.sh` now
+`chmod 700`s `~/.config/overclock` and `chmod 600`s the migrated legacy env
+copy (it previously inherited the source's mode). The launcher's new key file
+(`~/.config/overclock/key`) is written `0600`. Verified e2e: key file `0600`,
+agent dir `0700`.
 
 **Location:** `bin/overclock` line 20 (`mkdir -p "$AGENT_DIR"`), `metrics.ts` line
 26 (`logs/` dir), `install.sh` lines 80–84 (legacy env copy).
@@ -211,6 +244,16 @@ for `~/.config/overclock`; `chmod 600 "$ENV_FILE"` after the `cp`; `chmod 700` o
 `logs/` at creation. Consider `0600` on new session files if pi doesn't set it.
 
 ### F7 — `verify`/`delegate` sub-agents run unrestricted bash; "read-only" is a prompt rule
+
+**Status: MITIGATED — capability model unchanged by design.** verify needs bash
+to run tests/builds, and delegate needs full coding tools — restriction by
+regex would be security theater. Mitigations shipped: (a) F2 removes the API
+key from the environment these tools inherit; (b) `overclock --safe` excludes
+`delegate`, `verify`, `bash`, `write`, `edit` entirely — the only true
+capability boundary; (c) README documents which agents can modify state.
+`explore` remains the only tool-surface-restricted agent (no write/exec at
+all). Open follow-up if ever needed: pi's `spawnHook`/`commandPrefix` could
+sandbox sub-agent bash (`sandbox-exec`/`bwrap`), at the cost of portability.
 
 **Location:** `extensions/overclock/subagents.ts` lines 138–143.
 
@@ -232,6 +275,15 @@ write/exec capability.)
 - Keep the tool-surface principle: enforce capabilities in code, not prose.
 
 ### F8 — No prompt-injection guardrails; untrusted-repo use is unrestricted
+
+**Status: FIXED** (guardrails added). `overclock --safe` runs the session with
+`read,grep,find,ls,explore` only — no bash, no writes, no delegate/verify —
+so a hostile repo can waste tokens but cannot execute or modify. The flag is
+consumed by the launcher (pi never sees it) and args after `--` stay prompt
+text. README now carries a Security section: file contents are model
+instructions; use `--safe` (or a container) in untrusted repos; see
+SECURITY.md for the full review. Residual: prompt injection in *default* mode
+is inherent to coding agents — the control is choosing the mode.
 
 **Location:** whole-agent design — `bin/overclock` line 89
 (`--tools read,write,edit,bash,...`).
@@ -257,6 +309,14 @@ document the boundary or offer a reduced-capability mode.
   confirmation on sensitive patterns (`curl`, `env`, writes outside cwd).
 
 ### F9 — Install/update supply chain
+
+**Status: FIXED — residual noted.** `install.sh` now uses `npm ci --omit=dev`
+(exact lockfile reproduction, fails on drift instead of resolving fresh
+ranges), no longer passes `--no-audit` (advisories surface in output), and
+prints "(local changes are discarded)" before `git reset --hard`. Residual:
+the `curl | bash` trust model is unchanged — installing/updating still executes
+code from this repo + npm; a pinned-tag + checksum install path and signed
+commits remain future hardening once the project has external users.
 
 **Location:** `install.sh` (whole file); README one-liner `curl | bash`.
 
@@ -329,14 +389,12 @@ Consider a run-level token ceiling for the main loop too.
 
 ### F14 — Minor hygiene
 
-**Status: PARTIAL** — the stale `bin/` gitignore rule was removed under F10.
-Remaining open items:
+**Status: PARTIAL** — the stale `bin/` gitignore rule was removed under F10,
+and the `reset --hard` update path now prints "(local changes are discarded)"
+under F9. Remaining open items:
 
 - `install.sh` line 60: `ln -sf` silently overwrites an existing
   `~/.local/bin/overclock` regular file. Check-and-warn first.
-- `install.sh` line 41: `git reset --hard origin/$BRANCH` destroys any local
-  edits in `~/.local/share/overclock` without warning — expected for a managed
-  dir, but print a notice.
 - `bin/overclock` line 70: the `--session` guard treats any next-arg starting
   with `-` as missing — fine for IDs, but note `--session-dir -weird-path` can't
   be expressed (edge case; `--session-dir=-path` form unaffected).

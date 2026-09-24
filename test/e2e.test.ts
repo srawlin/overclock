@@ -8,7 +8,7 @@
 
 import { spawn, spawnSync } from "node:child_process"
 import { createServer, type Server } from "node:http"
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -58,6 +58,12 @@ function sse(): string {
 	check("symlinked --version exits 0", r.status === 0, `status=${r.status} stderr=${r.stderr?.slice(0, 200)}`)
 	check("symlinked run uses bundled pi (no PATH fallback)", !(r.stderr ?? "").includes("using pi from PATH"), r.stderr?.slice(0, 200))
 	rmSync(linkDir, { recursive: true, force: true })
+}
+
+// --- 1a2. F8: --safe is consumed by the launcher (pi would reject it) ---
+{
+	const r = spawnSync(BIN, ["--safe", "--version"], { encoding: "utf8", timeout: 20_000, stdio: ["ignore", "pipe", "pipe"] })
+	check("--safe --version exits 0 (flag consumed)", r.status === 0, `status=${r.status} stderr=${r.stderr?.slice(0, 200)}`)
 }
 
 // --- 1b. rebrand: --help addresses "overclock", pi's package.json is piConfig-patched ---
@@ -143,6 +149,17 @@ try {
 
 	check("mock received a POST", posts >= 1, `posts=${posts} stderr=${r.stderr?.slice(-400)}`)
 	check("request carried Authorization header", sawAuth)
+	check("key resolved via !command file (Bearer test-key)", lastAuth === "Bearer test-key", `auth=${lastAuth}`)
+
+	// --- 2b. F2/F6: key landed in a 0600 file, agent dir is 0700 ---
+	{
+		const keyFile = join(home, ".config", "overclock", "key")
+		check("key file written", existsSync(keyFile))
+		check("key file mode 0600", existsSync(keyFile) && (statSync(keyFile).mode & 0o777) === 0o600, `mode=${existsSync(keyFile) ? (statSync(keyFile).mode & 0o777).toString(8) : "n/a"}`)
+		check("key file holds the key", existsSync(keyFile) && readFileSync(keyFile, "utf8") === "test-key")
+		check("agent dir mode 0700", (statSync(agentDir).mode & 0o777) === 0o700, `mode=${(statSync(agentDir).mode & 0o777).toString(8)}`)
+	}
+
 	check("clear_thinking applied to wire payload", sawClearThinking)
 	check("model id reaches wire", (lastPayload?.model as string | undefined)?.includes("qwen") === true, JSON.stringify(lastPayload?.model))
 	check("e2e run exits 0", r.status === 0, `status=${r.status} stderr=${r.stderr?.slice(-400)}`)

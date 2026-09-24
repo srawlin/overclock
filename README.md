@@ -49,6 +49,7 @@ overclock                # interactive TUI
 overclock -p "fix the failing test"   # print mode — one shot, stdout
 overclock -r             # resume your last session
 overclock --session <id> # resume a specific session (shown on exit)
+overclock --safe         # read-only mode: no bash, no writes, no delegate/verify
 ```
 
 Exit with `/exit`, `/quit`, or Ctrl-D — the session-resume hint printed on exit is already `overclock`-branded.
@@ -57,7 +58,7 @@ Exit with `/exit`, `/quit`, or Ctrl-D — the session-resume hint printed on exi
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `CEREBRAS_API_KEY` | — | Required. Or put it in `~/.config/overclock/env` |
+| `CEREBRAS_API_KEY` | — | Required. Or put it in `~/.config/overclock/env`. At launch the key is stored in `~/.config/overclock/key` (0600) and **removed from the agent's environment** — commands the agent runs never see it (see Security) |
 | `OVERCLOCK_MODEL` | `cerebras/qwen-3.8-27b` | Main agent model |
 | `OVERCLOCK_EXPLORE_MODEL` | `gpt-oss-120b` | Route `explore` to a cheaper search model (default). Set to `""` to run explore on the main model. Only the *main* model is per-session; sub-agent model routing is cache-safe. |
 | `OVERCLOCK_FAST` | off | Aggressive preset: tighter keep window, 8k output cap |
@@ -66,7 +67,7 @@ Exit with `/exit`, `/quit`, or Ctrl-D — the session-resume hint printed on exi
 | `OVERCLOCK_SUBAGENT_REASONING` | `low` | Same for sub-agent inner requests |
 | `OVERCLOCK_TEMPERATURE` | provider default | Sampling temperature for main-loop requests |
 | `OVERCLOCK_DEBUG` | off | Per-request wire-size stats to stderr |
-| `OVERCLOCK_API_BASE` | `api.cerebras.ai/v1` | Custom endpoint (proxy/gateway/test) |
+| `OVERCLOCK_API_BASE` | `api.cerebras.ai/v1` | Custom endpoint (proxy/gateway/test). Must be `https://` — `http://` accepted only for localhost |
 | `OVERCLOCK_AGENT_DIR` | `~/.overclock/agent` | Sessions, settings, metrics. `OVERCLOCK_CODING_AGENT_DIR` / `PI_CODING_AGENT_DIR` also honored (pi's own vars) |
 
 
@@ -112,6 +113,18 @@ extensions/overclock/
 test/                            # unit + mock e2e tests (bun)
 test/eval/                       # real-API eval harness
 ```
+
+## Security
+
+overclock is a coding agent: in default mode the model can **read files, edit files, and run arbitrary shell commands as you**. File contents and tool output are instructions to the model — treat an untrusted repo as adversarial input, not passive data.
+
+- **`--safe`** runs a read-only session (`read`, `grep`, `find`, `ls`, `explore` only — no bash, no writes, no `delegate`/`verify`). Use it in repos you wouldn't hand your credentials to, or inside a container/VM for anything actively suspicious.
+- **Sub-agent capabilities:** only `explore` is capability-restricted (no write/exec tools). `verify` and `delegate` can run shell commands and modify the workspace — their prompts ask them not to, but prompts are guidelines, not boundaries.
+- **API key storage:** the launcher moves `CEREBRAS_API_KEY` into `~/.config/overclock/key` (0600) and unsets it from the agent's environment, so spawned commands can't read it. Other secrets in your shell env are still visible to commands the agent runs — same as running them yourself.
+- Session transcripts under `~/.overclock/agent` record what the model saw, verbatim — including secrets it read. The directory is owner-only (0700); treat its contents as sensitive.
+- `./.env` in a repo can supply `CEREBRAS_API_KEY` but is **parsed, never executed**, and can't override other config.
+
+Full findings and severity ratings: [SECURITY.md](SECURITY.md). Report vulnerabilities via a GitHub private security advisory.
 
 ## Disclaimer
 

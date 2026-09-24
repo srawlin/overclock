@@ -26,6 +26,8 @@ AGENT_DIR="${OVERCLOCK_CODING_AGENT_DIR:-${PI_CODING_AGENT_DIR:-${OVERCLOCK_AGEN
 export OVERCLOCK_CODING_AGENT_DIR="$AGENT_DIR"
 export PI_CODING_AGENT_DIR="$AGENT_DIR"
 mkdir -p "$AGENT_DIR"
+# Session transcripts record file contents verbatim — keep the dir owner-only (F6).
+chmod 700 "$HOME/.overclock" "$AGENT_DIR" 2>/dev/null || true
 
 # First-run defaults; user-editable afterwards.
 if [ ! -f "$AGENT_DIR/settings.json" ]; then
@@ -76,6 +78,25 @@ if [ -z "${CEREBRAS_API_KEY:-}" ]; then
 	fi
 fi
 
+# F2: keep the API key out of the agent's environment. Every command the bash
+# tool spawns inherits process.env, so a key stored there is one `env` (or one
+# repo script / prompt-injected command) away from exfiltration. pi instead
+# resolves the provider key via a `!command` — env var first (non-launcher
+# usage), else this 0600 file. Once the file provably holds the key, drop the
+# env var so nothing spawned from here can see it.
+if [ -n "${CEREBRAS_API_KEY:-}" ]; then
+	CONF_DIR="$HOME/.config/overclock"
+	KEY_FILE="$CONF_DIR/key"
+	mkdir -p "$CONF_DIR" 2>/dev/null
+	chmod 700 "$CONF_DIR" 2>/dev/null
+	if [ "$(cat "$KEY_FILE" 2>/dev/null)" != "$CEREBRAS_API_KEY" ]; then
+		printf %s "$CEREBRAS_API_KEY" > "$KEY_FILE" 2>/dev/null
+	fi
+	if [ "$(cat "$KEY_FILE" 2>/dev/null)" = "$CEREBRAS_API_KEY" ] && chmod 600 "$KEY_FILE" 2>/dev/null; then
+		unset CEREBRAS_API_KEY
+	fi
+fi
+
 # pi's own update banner names "pi" and suggests `pi update` — confusing under
 # overclock branding (and pi isn't on PATH). The extension reports pi updates
 # itself, with the right package name and upgrade path.
@@ -110,6 +131,22 @@ for ((i=1; i<=$#; i++)); do
 	esac
 done
 
+# --safe: read-only mode for untrusted repos — drops every tool that can write
+# files or execute commands (F8). Consumed here; pi never sees the flag. Args
+# after `--` are prompt text, not flags.
+TOOLS="read,write,edit,bash,grep,find,ls,explore,delegate,verify"
+filtered=()
+seen_dd=0
+for arg in "$@"; do
+	[ "$arg" = "--" ] && seen_dd=1
+	if [ "$seen_dd" = 0 ] && [ "$arg" = "--safe" ]; then
+		TOOLS="read,grep,find,ls,explore"
+		continue
+	fi
+	filtered+=("$arg")
+done
+set -- ${filtered[@]+"${filtered[@]}"}
+
 # Prefer the pinned dependency. Falling back to a PATH pi means either deps are
 # missing or HERE resolved wrong — warn, since a random PATH binary is both a
 # version risk and a hijack surface (F3).
@@ -126,5 +163,5 @@ fi
 exec "$PI" \
 	--extension "$HERE/extensions/overclock" \
 	--model "${OVERCLOCK_MODEL:-${FASTCODE_MODEL:-cerebras/qwen-3.8-27b}}" \
-	--tools read,write,edit,bash,grep,find,ls,explore,delegate,verify \
+	--tools "$TOOLS" \
 	"$@"

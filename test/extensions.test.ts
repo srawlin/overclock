@@ -2,7 +2,7 @@ import { OVERCLOCK_GUIDANCE } from "../extensions/overclock/prompt"
 import { registerSubAgentTools, resolveSubAgentModel } from "../extensions/overclock/subagents"
 import { logoLines } from "../extensions/overclock/logo"
 import { newerVersion } from "../extensions/overclock/version-check"
-import overclock from "../extensions/overclock"
+import overclock, { resolveApiBase } from "../extensions/overclock"
 import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -77,6 +77,36 @@ process.env.OVERCLOCK_EXPLORE_MODEL = ""
 check("OVERCLOCK_* overrides legacy FASTCODE_*", resolveSubAgentModel(ctx, "explore") === mainModel)
 delete process.env.OVERCLOCK_EXPLORE_MODEL
 delete process.env.FASTCODE_EXPLORE_MODEL
+
+// --- F5: OVERCLOCK_API_BASE validation (https required; http loopback only) ---
+{
+	const set = (v: string | undefined) => {
+		delete process.env.OVERCLOCK_API_BASE
+		delete process.env.FASTCODE_API_BASE
+		if (v !== undefined) process.env.OVERCLOCK_API_BASE = v
+	}
+	const DEFAULT = "https://api.cerebras.ai/v1"
+	set(undefined)
+	check("api base: unset → cerebras default", resolveApiBase() === DEFAULT)
+	set("https://api.cerebras.ai/v1")
+	check("api base: https kept", resolveApiBase() === "https://api.cerebras.ai/v1")
+	set("https://proxy.corp.example/v1")
+	check("api base: https proxy kept", resolveApiBase() === "https://proxy.corp.example/v1")
+	set("http://127.0.0.1:8123/v1")
+	check("api base: http loopback kept", resolveApiBase() === "http://127.0.0.1:8123/v1")
+	set("http://localhost:8080")
+	check("api base: http localhost kept", resolveApiBase() === "http://localhost:8080")
+	set("http://evil.example.com")
+	check("api base: remote http refused → default", resolveApiBase() === DEFAULT)
+	set("ftp://x")
+	check("api base: non-http scheme refused", resolveApiBase() === DEFAULT)
+	set("not a url")
+	check("api base: garbage refused → default", resolveApiBase() === DEFAULT)
+	set(undefined)
+	process.env.FASTCODE_API_BASE = "https://legacy.example/v1"
+	check("api base: legacy FASTCODE_API_BASE honored", resolveApiBase() === "https://legacy.example/v1")
+	delete process.env.FASTCODE_API_BASE
+}
 
 // --- /exit command (regression: pi only ships /quit — /exit used to go to the model) ---
 process.env.PI_CODING_AGENT_DIR = mkdtempSync(join(tmpdir(), "overclock-ext-test-"))

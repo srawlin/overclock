@@ -57,15 +57,35 @@ function contentPartTypes(message: unknown): string[] {
 // empty skeleton that arrives in message_start.
 const HAS_OUTPUT = (types: string[]) => types.some((t) => t === "text" || t === "thinking" || t === "toolCall")
 
+const DEFAULT_API_BASE = "https://api.cerebras.ai/v1"
+
+// OVERCLOCK_API_BASE overrides the endpoint — used by the e2e test's local mock
+// and handy for proxies/gateways. Validated (F5): https required, http only for
+// loopback — anything else would send the API key and transcript in the clear.
+export function resolveApiBase(): string {
+	const raw = envVar("API_BASE")
+	if (!raw) return DEFAULT_API_BASE
+	try {
+		const url = new URL(raw)
+		const loopback = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(url.hostname)
+		if (url.protocol === "https:" || (url.protocol === "http:" && loopback)) return raw
+	} catch {}
+	console.error(
+		`[overclock] refusing OVERCLOCK_API_BASE=${JSON.stringify(raw)} — must be https:// ` +
+			`(http:// allowed only for localhost). Using ${DEFAULT_API_BASE}`,
+	)
+	return DEFAULT_API_BASE
+}
+
 export default function overclock(pi: ExtensionAPI) {
 	// Cerebras catalog: qwen-3.8-27b is too new for pi's built-in list.
-	// OVERCLOCK_API_BASE overrides the endpoint — used by the e2e test's local
-	// mock server and handy for proxies/gateways.
 	pi.registerProvider("cerebras", {
-		baseUrl: envVar("API_BASE") ?? "https://api.cerebras.ai/v1",
-		// pi >= 0.74 treats apiKey as a literal/interpolation: "$VAR" reads the
-		// env var; a bare name would be sent as the literal key (→ 401).
-		apiKey: "$CEREBRAS_API_KEY",
+		baseUrl: resolveApiBase(),
+		// F2: the key never lives in the agent's process env (bash-tool spawns
+		// inherit it). pi >= 0.74 apiKey forms: literal, "$VAR" interpolation,
+		// or "!command" — exec'd per request, stdout = key. Env var first for
+		// non-launcher usage; else the 0600 file the launcher maintains.
+		apiKey: `!if [ -n "$CEREBRAS_API_KEY" ]; then printf %s "$CEREBRAS_API_KEY"; else cat "$HOME/.config/overclock/key" 2>/dev/null; fi`,
 		api: "openai-completions",
 		models: CEREBRAS_MODELS,
 	})

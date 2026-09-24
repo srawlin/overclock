@@ -36,7 +36,7 @@ node_ok || fail "node >= 22.19 required — install from https://nodejs.org or v
 
 # --- clone or update --------------------------------------------------------
 if [ -d "$DEST/.git" ]; then
-	say "updating $DEST"
+	say "updating $DEST (local changes are discarded)"
 	git -C "$DEST" fetch --quiet origin "$BRANCH"
 	git -C "$DEST" reset --hard --quiet "origin/$BRANCH"
 else
@@ -53,7 +53,9 @@ fi
 
 # --- deps -------------------------------------------------------------------
 say "installing dependencies"
-(cd "$DEST" && npm install --omit=dev --no-fund --no-audit --loglevel=error)
+# npm ci installs exactly the lockfile — fails on drift rather than resolving
+# fresh ranges. Audit output is kept so advisories surface (F9).
+(cd "$DEST" && npm ci --omit=dev --no-fund --loglevel=error)
 
 # --- link -------------------------------------------------------------------
 mkdir -p "$BIN_DIR"
@@ -78,9 +80,12 @@ LEGACY_ENV_FILE="$HOME/.config/fastcode/env"
 if [ -n "${CEREBRAS_API_KEY:-}" ] || grep -qs "CEREBRAS_API_KEY" "$ENV_FILE" 2>/dev/null; then
 	: # already configured
 elif grep -qs "CEREBRAS_API_KEY" "$LEGACY_ENV_FILE" 2>/dev/null; then
-	# carry the key forward to the renamed location
+	# carry the key forward to the renamed location — lock down perms, the
+	# source may be world-readable (F6)
 	mkdir -p "$(dirname "$ENV_FILE")"
+	chmod 700 "$(dirname "$ENV_FILE")"
 	cp "$LEGACY_ENV_FILE" "$ENV_FILE"
+	chmod 600 "$ENV_FILE"
 	say "migrated config from $LEGACY_ENV_FILE -> $ENV_FILE"
 elif [ -r /dev/tty ]; then
 	printf '  CEREBRAS_API_KEY (from https://cloud.cerebras.ai): ' > /dev/tty
@@ -88,6 +93,7 @@ elif [ -r /dev/tty ]; then
 	printf '\n' > /dev/tty
 	if [ -n "${KEY:-}" ]; then
 		mkdir -p "$(dirname "$ENV_FILE")"
+		chmod 700 "$(dirname "$ENV_FILE")"
 		printf 'CEREBRAS_API_KEY=%s\n' "$KEY" > "$ENV_FILE"
 		chmod 600 "$ENV_FILE"
 		say "saved key to $ENV_FILE"
