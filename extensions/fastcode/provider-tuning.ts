@@ -1,12 +1,15 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent"
 import { logMetrics } from "./metrics"
+import { maxCompletionTokens } from "./knobs"
 
 // Cerebras rate limiting estimates consumption as input + max_completion_tokens
 // before the request runs. pi defaults it to the model's 32-40k ceiling, so
 // every turn reserves far more output quota than an agentic step needs.
 // Typical tool-call turns finish under ~4k output; 16k keeps long writes safe
 // while roughly halving the reservation.
-const MAX_COMPLETION_TOKENS = 16_384
+// `FASTCODE_FAST=1` tightens it via knobs.maxCompletionTokens. Cerebras rate
+// limits on input + this reservation, and it also feeds the pacing budget, so a
+// smaller cap saves both wire tokens and pre-request sleep.
 
 // Cerebras Developer limits: 750k total tokens/min (cached + uncached count
 // equally). Fast steps plus parallel tool calls can burst past that, and 429
@@ -55,13 +58,14 @@ export function installProviderTuning(pi: ExtensionAPI) {
 				if (m.role === "assistant" && m.reasoning !== undefined) delete m.reasoning
 			}
 
+			const cap = maxCompletionTokens()
 			const current = typeof p.max_completion_tokens === "number" ? p.max_completion_tokens : undefined
-			if (current === undefined || current > MAX_COMPLETION_TOKENS) {
-				p.max_completion_tokens = MAX_COMPLETION_TOKENS
+			if (current === undefined || current > cap) {
+				p.max_completion_tokens = cap
 			}
 		}
 
-		const reserved = typeof p.max_completion_tokens === "number" ? p.max_completion_tokens : MAX_COMPLETION_TOKENS
+		const reserved = typeof p.max_completion_tokens === "number" ? p.max_completion_tokens : maxCompletionTokens()
 		await paceRequest(Math.ceil(JSON.stringify(p).length / 4) + reserved)
 		return p
 	})

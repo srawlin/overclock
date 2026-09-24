@@ -1,0 +1,13 @@
+// index.js — barrel re-export (names only; constants NOT re-exported).
+export { describe as alphaDescribe, META as alphaMeta } from "./alpha.js"
+export { describe as betaDescribe, META as betaMeta } from "./beta.js"
+export { describe as gammaDescribe, META as gammaMeta } from "./gamma.js"
+export { describe as deltaDescribe, META as deltaMeta } from "./delta.js"
+export { describe as epsilonDescribe, META as epsilonMeta } from "./epsilon.js"
+export { describe as zetaDescribe, META as zetaMeta } from "./zeta.js"
+export { describe as etaDescribe, META as etaMeta } from "./eta.js"
+export { describe as thetaDescribe, META as thetaMeta } from "./theta.js"
+export { describe as iotaDescribe, META as iotaMeta } from "./iota.js"
+export { describe as kappaDescribe, META as kappaMeta } from "./kappa.js"
+export { describe as lambdaDescribe, META as lambdaMeta } from "./lambda.js"
+export { describe as muDescribe, META as muMeta } from "./mu.js"

@@ -2,6 +2,7 @@ import type { AgentMessage } from "@mariozechner/pi-agent-core"
 import type { TextContent, ToolResultMessage } from "@mariozechner/pi-ai"
 import { estimateTokens, type ExtensionAPI } from "@mariozechner/pi-coding-agent"
 import { logMetrics } from "./metrics"
+import { hardBudgetTokens, keepRecentToolTokens, tightKeepTokens } from "./knobs"
 
 // Cerebras qwen-3.8-27b: 128k context. Every request re-sends the transcript,
 // so steady-state size drives both TTFT and cost. Old tool outputs are the
@@ -20,12 +21,11 @@ import { logMetrics } from "./metrics"
 //   once they're behind the boundary.
 
 /** Tool output kept verbatim, counted back from the newest results. */
-const KEEP_RECENT_TOOL_TOKENS = 16_000
+// Size thresholds below are the non-fast baseline. The keep-window constants
+// (KEEP_RECENT / HARD_BUDGET / TIGHT_KEEP) became knobs — see knobs.ts; the
+// `FASTCODE_FAST=1` preset tightens them to slash wire size and TTFT.
 /** Don't stub outputs smaller than this — not worth the churn. */
 const MIN_PRUNE_CHARS = 800
-/** Above this estimate, tighten the keep window instead. */
-const HARD_BUDGET_TOKENS = 80_000
-const TIGHT_KEEP_TOKENS = 4_000
 /** A single in-flight result larger than this gets middle-truncated so one
  *  oversized dump can't eat the whole window before the model even sees it. */
 const IN_FLIGHT_MAX_CHARS = 32_000
@@ -182,7 +182,7 @@ export function pruneContext(messages: AgentMessage[]): { messages: AgentMessage
 	}
 
 	const total = messages.reduce((sum, m) => sum + wireTokens(m), 0)
-	const keep = total > HARD_BUDGET_TOKENS ? TIGHT_KEEP_TOKENS : KEEP_RECENT_TOOL_TOKENS
+	const keep = total > hardBudgetTokens() ? tightKeepTokens() : keepRecentToolTokens()
 
 	const calls = collectToolCalls(messages)
 

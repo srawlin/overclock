@@ -3,7 +3,16 @@ import { installContextBudget } from "./context-budget"
 import { installProviderTuning } from "./provider-tuning"
 import { CEREBRAS_MODELS } from "./model"
 import { FASTCODE_GUIDANCE } from "./prompt"
-import { initMetrics, logMetrics, setMetricsSession } from "./metrics"
+import {
+	initMetrics,
+	logMetrics,
+	setMetricsSession,
+	toolEnd,
+	toolStart,
+	turnEnd,
+	turnFirstToken,
+	turnStart,
+} from "./metrics"
 import { registerSubAgentTools } from "./subagents"
 
 let sessionCaptured = false
@@ -12,6 +21,38 @@ function captureSession(ctx: ExtensionContext | undefined) {
 	sessionCaptured = true
 	setMetricsSession((ctx?.sessionManager as { getSessionId?: () => string } | undefined)?.getSessionId?.())
 }
+
+// ---- latency telemetry ----------------------------------------------------
+// The "is fastcode fast?" signal. The main loop runs one assistant turn at a
+// time, so a single activeKey suffices; sub-agent inner requests bypass
+// extension hooks entirely (they self-report via the `subagent` metric), so
+// these `turn`/`tool` records are main-loop only — no double counting.
+let activeTurnKey: string | undefined
+let turnSeq = 0
+
+// Per-run rollup, reset at agent_start. Lets a single number (wall + turns +
+// throughput) compare one run vs. another.
+const run = {
+	t0: 0,
+	turns: 0,
+	outputTok: 0,
+	firstTokSum: 0,
+	firstTokMin: Infinity,
+	toolTotalMs: 0,
+	nTools: 0,
+	toolErrs: 0,
+}
+
+function contentPartTypes(message: unknown): string[] {
+	const content = (message as { content?: unknown } | undefined)?.content
+	if (!Array.isArray(content)) return []
+	return (content as { type?: string }[]).map((p) => p?.type).filter((t): t is string => typeof t === "string")
+}
+
+// Content that means the assistant has actually started emitting (text, a
+// thinking token, or a tool call) — firstTokenMs marks that moment, not the
+// empty skeleton that arrives in message_start.
+const HAS_OUTPUT = (types: string[]) => types.some((t) => t === "text" || t === "thinking" || t === "toolCall")
 
 export default function fastcode(pi: ExtensionAPI) {
 	// Cerebras catalog: qwen-3.8-27b is too new for pi's built-in list.
@@ -63,9 +104,44 @@ export default function fastcode(pi: ExtensionAPI) {
 	// Finalized assistant messages carry server-reported usage — the ground
 	// truth for wire size, cache hits, and output volume.
 	pi.on("message_end", (event) => {
-		const m = event.message as { role?: string; usage?: Record<string, unknown>; stopReason?: string }
-		if (m.role !== "assistant" || !m.usage) return
-		const u = m.usage as { input?: number; cacheRead?: number; output?: number; totalTokens?: number }
+		const m = event.message as {
+			role?: string
+			model?: string
+			usage?: Record<string, unknown>
+			stopReason?: string
+			content?: { type?: string }[]
+		}
+		if (m.role !== "assistant") return
+		const u = m.usage as { input?: number; cacheRead?: number; output?: number; totalTokens?: number } | undefined
+		// Per-turn latency: TTFT (start → first emitted token) + total (start →
+		// end), output tokens, and derived throughput.
+		if (activeTurnKey !== undefined) {
+			const rec = turnEnd(activeTurnKey)
+			activeTurnKey = undefined
+			if (rec) {
+				const outputTok = u?.output ?? rec.outputTok
+				const toolCalls = (m.content ?? []).filter((p) => p?.type === "toolCall").length
+				logMetrics({
+					kind: "turn",
+					model: m.model,
+					firstTokenMs: rec.firstTokenMs,
+					totalMs: rec.totalMs,
+					outputTok,
+					tokensPerSec: rec.totalMs > 0 ? Math.round(((outputTok ?? 0) / (rec.totalMs / 1000)) * 10) / 10 : 0,
+					toolCalls,
+					stopReason: m.stopReason,
+					usage: u ?? undefined,
+				})
+				// run rollup
+				if (run.t0) {
+					run.turns++
+					run.outputTok += outputTok ?? 0
+					run.firstTokSum += rec.firstTokenMs
+					run.firstTokMin = Math.min(run.firstTokMin, rec.firstTokenMs)
+				}
+			}
+		}
+		if (!u) return
 		logMetrics({
 			kind: "usage",
 			input: u.input,
@@ -74,6 +150,60 @@ export default function fastcode(pi: ExtensionAPI) {
 			totalTokens: u.totalTokens,
 			stopReason: m.stopReason,
 		})
+	})
+
+	// TTFT anchor: mark the first emitted content token of the in-flight turn.
+	pi.on("message_start", (event) => {
+		const m = event.message as { role?: string }
+		if (m.role === "assistant") {
+			activeTurnKey = `t${++turnSeq}`
+			turnStart(activeTurnKey)
+		}
+	})
+	pi.on("message_update", (event) => {
+		const m = event.message as { role?: string }
+		if (m.role === "assistant" && activeTurnKey !== undefined && HAS_OUTPUT(contentPartTypes(m))) {
+			turnFirstToken(activeTurnKey)
+		}
+	})
+
+	// Per-tool-call latency (main loop only).
+	pi.on("tool_execution_start", (event) => {
+		toolStart(event.toolCallId, event.toolName)
+	})
+	pi.on("tool_execution_end", (event) => {
+		const rec = toolEnd(event.toolCallId, event.isError)
+		if (!rec) return
+		logMetrics({ kind: "tool", name: rec.name, ms: rec.ms, isError: rec.isError })
+		if (run.t0) {
+			run.toolTotalMs += rec.ms
+			run.nTools++
+			if (rec.isError) run.toolErrs++
+		}
+	})
+
+	// Whole-run rollup: wall clock, turns, throughput, tool time.
+	pi.on("agent_start", () => {
+		turnSeq = 0
+		activeTurnKey = undefined
+		Object.assign(run, { t0: Date.now(), turns: 0, outputTok: 0, firstTokSum: 0, firstTokMin: Infinity, toolTotalMs: 0, nTools: 0, toolErrs: 0 })
+	})
+	pi.on("agent_end", () => {
+		if (!run.t0) return
+		const wallMs = Date.now() - run.t0
+		logMetrics({
+			kind: "run_end",
+			wallMs,
+			turns: run.turns,
+			outputTok: run.outputTok,
+			avgFirstTokenMs: run.turns ? Math.round(run.firstTokSum / run.turns) : 0,
+			bestFirstTokenMs: run.firstTokMin === Infinity ? 0 : run.firstTokMin,
+			tokensPerSec: wallMs > 0 ? Math.round((run.outputTok / (wallMs / 1000)) * 10) / 10 : 0,
+			toolTotalMs: run.toolTotalMs,
+			nTools: run.nTools,
+			toolErrs: run.toolErrs,
+		})
+		run.t0 = 0
 	})
 
 	pi.on("before_agent_start", (event) => ({
