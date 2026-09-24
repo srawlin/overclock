@@ -59,6 +59,13 @@ say "installing dependencies"
 
 # --- link -------------------------------------------------------------------
 mkdir -p "$BIN_DIR"
+# Don't silently clobber an unrelated regular file at the link target (F14).
+if [ -f "$BIN_DIR/overclock" ] && [ ! -L "$BIN_DIR/overclock" ]; then
+	case "$(head -c 200 "$BIN_DIR/overclock" 2>/dev/null)" in
+		*overclock*) ;;
+		*) fail "$BIN_DIR/overclock exists and isn't ours — move it aside or set OVERCLOCK_BIN_DIR" ;;
+	esac
+fi
 ln -sf "$DEST/bin/overclock" "$BIN_DIR/overclock"
 chmod +x "$DEST/bin/overclock"
 

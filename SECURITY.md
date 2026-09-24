@@ -37,7 +37,7 @@ configured LLM endpoint. The three boundaries that matter:
 | F11 | LOW      | `postinstall.mjs` mutates `node_modules` after npm integrity checks | Open |
 | F12 | LOW      | Version check phones home to pi.dev on every session start | Open |
 | F13 | LOW      | No sub-agent turn/time/token cap — unbounded spend possible | Open |
-| F14 | LOW      | Hygiene: stale `bin/` gitignore rule; `ln -sf` clobbers existing files | Partial |
+| F14 | LOW      | Hygiene: stale `bin/` gitignore rule; `ln -sf` clobbers existing files | **Fixed** (1 won't-fix, documented) |
 
 ---
 
@@ -389,15 +389,23 @@ Consider a run-level token ceiling for the main loop too.
 
 ### F14 — Minor hygiene
 
-**Status: PARTIAL** — the stale `bin/` gitignore rule was removed under F10,
-and the `reset --hard` update path now prints "(local changes are discarded)"
-under F9. Remaining open items:
+**Status: CLOSED** — all items resolved or documented.
 
-- `install.sh` line 60: `ln -sf` silently overwrites an existing
-  `~/.local/bin/overclock` regular file. Check-and-warn first.
-- `bin/overclock` line 70: the `--session` guard treats any next-arg starting
-  with `-` as missing — fine for IDs, but note `--session-dir -weird-path` can't
-  be expressed (edge case; `--session-dir=-path` form unaffected).
+- ~~`bin/` gitignore rule~~ — removed under F10.
+- ~~`reset --hard` silent destruction~~ — prints "(local changes are discarded)"
+  under F9.
+- ~~`install.sh` `ln -sf` silently overwrites an existing
+  `~/.local/bin/overclock` regular file~~ — **fixed**: the installer now refuses
+  if a regular file exists there that doesn't look like ours (first 200 bytes
+  lack "overclock"), telling the user to move it aside or set
+  `OVERCLOCK_BIN_DIR`. Symlinks are still replaced freely — replacing a link
+  destroys no file.
+- `--session*` flags can't take `-`-leading values — **won't fix (edge case)**.
+  Our launcher guard treats `-`-prefixed next-args as "missing value" (that's
+  the fix for pi's flag-swallowing bug). A path/id literally starting with `-`
+  is pathological; the workaround is a relative path (`--session-dir ./-name`).
+  Note: pi's parser has no `--flag=value` form, so that escape doesn't exist —
+  this finding's original note was wrong on that point.
 
 ---
 
