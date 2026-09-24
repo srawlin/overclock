@@ -1,5 +1,5 @@
-import { Agent } from "@mariozechner/pi-agent-core"
-import { streamSimple, type TextContent } from "@mariozechner/pi-ai"
+import { Agent } from "@earendil-works/pi-agent-core"
+import { type TextContent } from "@earendil-works/pi-ai"
 import {
 	convertToLlm,
 	createBashTool,
@@ -8,11 +8,12 @@ import {
 	type AgentToolResult,
 	type ExtensionAPI,
 	type ExtensionContext,
-} from "@mariozechner/pi-coding-agent"
+} from "@earendil-works/pi-coding-agent"
 import { Type } from "typebox"
 import { pruneContext } from "./context-budget"
 import { logMetrics } from "./metrics"
 import { paceRequest } from "./provider-tuning"
+import { subAgentReasoningEffort } from "./knobs"
 
 // Cerebras enforces RPM and TPM per org. Sub-agents multiply request rate, so
 // cap concurrency — three in-flight sub-agents is plenty at ~1500 tok/s.
@@ -122,9 +123,7 @@ async function runSubAgent(
 ): Promise<AgentToolResult<SubAgentDetails>> {
 	const model = resolveSubAgentModel(ctx, name)
 	if (!model) return errorResult("no active model")
-	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model)
-	if (!auth.ok) return errorResult(`cannot resolve credentials: ${auth.error}`)
-	if (!auth.apiKey) return errorResult(`no API key for provider ${model.provider}`)
+	if (!ctx.modelRegistry.hasConfiguredAuth(model)) return errorResult(`no API key for provider ${model.provider}`)
 
 	await acquire()
 	const start = Date.now()
@@ -147,23 +146,26 @@ async function runSubAgent(
 			// Same per-request pruning as the main loop — inner transcripts are
 			// disposable but still ride the wire every turn.
 			transformContext: async (messages) => pruneContext(messages).messages,
+			// ctx.modelRegistry.streamSimple resolves provider auth (API key,
+			// headers, OAuth) at request time — no manual credential plumbing.
 			streamFn: (m, c, o) =>
-				streamSimple(m, c, {
+				ctx.modelRegistry.streamSimple(m, c, {
 					...o,
 					// Inner requests bypass extension hooks, so the provider tuning
 					// has to be applied here: low reasoning, capped output
 					// reservation, clear_thinking, and shared TPM pacing.
 					reasoning: o?.reasoning ?? "low",
 					maxTokens: Math.min(o?.maxTokens ?? 16_384, 16_384),
-					onPayload: async (payload, _model) => {
+					onPayload: async (payload: unknown, _model: unknown) => {
 						const p = payload as Record<string, unknown>
 						if (typeof p.model === "string" && p.model.includes("qwen")) p.clear_thinking = true
+						const effort = subAgentReasoningEffort()
+						if (effort) p.reasoning_effort = effort
 						const reserved = typeof p.max_completion_tokens === "number" ? p.max_completion_tokens : 16_384
 						await paceRequest(Math.ceil(JSON.stringify(p).length / 4) + reserved)
 						return p
 					},
 				}),
-			getApiKey: () => auth.apiKey,
 			toolExecution: "parallel",
 		})
 		let turns = 0

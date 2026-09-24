@@ -1,6 +1,6 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent"
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import { logMetrics } from "./metrics"
-import { maxCompletionTokens } from "./knobs"
+import { maxCompletionTokens, reasoningEffortOverride, temperatureOverride } from "./knobs"
 
 // Cerebras rate limiting estimates consumption as input + max_completion_tokens
 // before the request runs. pi defaults it to the model's 32-40k ceiling, so
@@ -68,6 +68,12 @@ export function installProviderTuning(pi: ExtensionAPI) {
 				p.max_completion_tokens = cap
 			}
 		}
+
+		// Experiment overrides — apply to every model, not just qwen.
+		const effort = reasoningEffortOverride()
+		if (effort) p.reasoning_effort = effort
+		const temp = temperatureOverride()
+		if (temp !== undefined) p.temperature = temp
 
 		const reserved = typeof p.max_completion_tokens === "number" ? p.max_completion_tokens : maxCompletionTokens()
 		await paceRequest(Math.ceil(JSON.stringify(p).length / 4) + reserved)

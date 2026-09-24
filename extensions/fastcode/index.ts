@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent"
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent"
 import { installContextBudget } from "./context-budget"
 import { installProviderTuning } from "./provider-tuning"
 import { CEREBRAS_MODELS } from "./model"
@@ -15,6 +15,7 @@ import {
 } from "./metrics"
 import { registerSubAgentTools } from "./subagents"
 import { logoComponent } from "./logo"
+import { checkPiUpdate } from "./version-check"
 
 let sessionCaptured = false
 function captureSession(ctx: ExtensionContext | undefined) {
@@ -61,7 +62,9 @@ export default function fastcode(pi: ExtensionAPI) {
 	// mock server and handy for proxies/gateways.
 	pi.registerProvider("cerebras", {
 		baseUrl: process.env.FASTCODE_API_BASE ?? "https://api.cerebras.ai/v1",
-		apiKey: "CEREBRAS_API_KEY",
+		// pi >= 0.74 treats apiKey as a literal/interpolation: "$VAR" reads the
+		// env var; a bare name would be sent as the literal key (→ 401).
+		apiKey: "$CEREBRAS_API_KEY",
 		api: "openai-completions",
 		models: CEREBRAS_MODELS,
 	})
@@ -74,7 +77,9 @@ export default function fastcode(pi: ExtensionAPI) {
 	// Startup banner — replaces pi's built-in header in interactive mode.
 	// session_start fires after ui.start(), so the header slot exists.
 	pi.on("session_start", (_event, ctx) => {
-		if (ctx.hasUI) ctx.ui.setHeader(() => logoComponent())
+		if (!ctx.hasUI) return
+		ctx.ui.setHeader(() => logoComponent())
+		checkPiUpdate((m, t) => ctx.ui.notify(m, t))
 	})
 
 	// pi's built-in exit is /quit (or Ctrl-D); /exit is not a command and would

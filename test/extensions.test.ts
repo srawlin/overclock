@@ -1,6 +1,7 @@
 import { FASTCODE_GUIDANCE } from "../extensions/fastcode/prompt"
 import { registerSubAgentTools, resolveSubAgentModel } from "../extensions/fastcode/subagents"
 import { logoLines } from "../extensions/fastcode/logo"
+import { newerVersion } from "../extensions/fastcode/version-check"
 import fastcode from "../extensions/fastcode"
 import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -101,6 +102,13 @@ const joined = lines.join("\n")
 check("logo renders 5 art rows + tagline + padding", lines.length === 8)
 check("logo has italic ANSI on fast", joined.includes("\x1b[3m") && joined.includes("\x1b[23m"))
 check("logo contains both words' glyphs", joined.includes("/ __/___") && joined.includes("\\__,_|"))
+
+// --- version check ---
+check("newer minor detected", newerVersion("0.88.0", "0.87.1"))
+check("newer patch detected", newerVersion("0.87.2", "0.87.1"))
+check("same version not newer", !newerVersion("0.87.1", "0.87.1"))
+check("older not newer", !newerVersion("0.86.9", "0.87.1"))
+check("garbage not newer", !newerVersion("nope", "0.87.1") && !newerVersion("0.88.0", ""))
 
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed ? 1 : 0)

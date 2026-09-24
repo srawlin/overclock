@@ -22,17 +22,17 @@ fail() { printf 'fastcode install: %s\n' "$*" >&2; exit 1; }
 
 command -v git >/dev/null 2>&1 || fail "git is required"
 
-# --- node >= 20 -----------------------------------------------------------
+# --- node >= 22.19 -----------------------------------------------------------
 node_ok() {
 	command -v node >/dev/null 2>&1 &&
-		[ "$(node -p 'parseInt(process.version.slice(1))' 2>/dev/null || echo 0)" -ge 20 ]
+		[ "$(node -p 'parseInt(process.version.slice(1))' 2>/dev/null || echo 0)" -ge 22 ]
 }
 if ! node_ok; then
 	# an nvm install may exist without being loaded in this shell
 	NEWEST="$(ls -d "$HOME"/.nvm/versions/node/*/bin 2>/dev/null | sort -V | tail -1 || true)"
 	[ -n "$NEWEST" ] && export PATH="$NEWEST:$PATH"
 fi
-node_ok || fail "node >= 20 required — install from https://nodejs.org or via nvm"
+node_ok || fail "node >= 22.19 required — install from https://nodejs.org or via nvm"
 
 # --- clone or update --------------------------------------------------------
 if [ -d "$DEST/.git" ]; then

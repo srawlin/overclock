@@ -14,7 +14,7 @@
 
 Cerebras serves models like `qwen-3.8-27b` at ~2,000 output tokens/sec — fast enough that the *harness* becomes the bottleneck. Heavier coding agents are built for slow inference: big fixed system prompts, sprawling tool surfaces, and context compaction that forces expensive re-reads (or worse, re-fetch loops where the model re-downloads files it already saw).
 
-fastcode is a thin extension on top of [`pi-coding-agent`](https://github.com/mariozechner/pi-coding-agent) that strips the harness down to what fast inference actually needs:
+fastcode is a thin extension on top of [`pi-coding-agent`](https://github.com/earendil-works/pi) that strips the harness down to what fast inference actually needs:
 
 - **Small fixed overhead** — ~4k tokens of system prompt + tool schemas, vs ~10k+ in heavier harnesses. Every request re-pays it; on Cerebras that difference is latency you can feel.
 - **Context budgeting instead of compaction spirals** — old tool outputs are elided in place (deduped by path/command, newest kept verbatim, generous keep window) so the transcript stays small *and* the model doesn't re-fetch what it already saw.
@@ -29,7 +29,7 @@ fastcode is a thin extension on top of [`pi-coding-agent`](https://github.com/ma
 curl -fsSL https://raw.githubusercontent.com/srawlin/fastcode/dev/install.sh | bash
 ```
 
-The installer clones to `~/.local/share/fastcode`, links `fastcode` into `~/.local/bin`, and prompts for your [Cerebras API key](https://cloud.cerebras.ai). Requires Node ≥ 20 and git.
+The installer clones to `~/.local/share/fastcode`, links `fastcode` into `~/.local/bin`, and prompts for your [Cerebras API key](https://cloud.cerebras.ai). Requires Node ≥ 22.19 and git.
 
 > **While the repo is private:** the raw.githubusercontent.com URL needs auth — clone with SSH instead and run `install.sh` locally, or let the installer's SSH fallback handle it.
 
@@ -59,9 +59,14 @@ Exit with `/exit`, `/quit`, or Ctrl-D.
 | `FASTCODE_EXPLORE_MODEL` | `gpt-oss-120b` | Route `explore` to a cheaper search model (default). Set to `""` to run explore on the main model. Only the *main* model is per-session; sub-agent model routing is cache-safe. |
 | `FASTCODE_FAST` | off | Aggressive preset: tighter keep window, 8k output cap |
 | `FASTCODE_KEEP_TOKENS` / `_HARD_BUDGET_TOKENS` / `_TIGHT_KEEP_TOKENS` / `_MAX_OUT_TOKENS` | 16k / 80k / 4k / 16k | Individual context/output knobs (override the preset) |
+| `FASTCODE_REASONING` | `low` (session setting) | Wire `reasoning_effort`: `low`/`medium`/`high`/`off`. **Warning:** `off` disables tool calls on qwen-3.8-27b — probe only |
+| `FASTCODE_SUBAGENT_REASONING` | `low` | Same for sub-agent inner requests |
+| `FASTCODE_TEMPERATURE` | provider default | Sampling temperature for main-loop requests |
 | `FASTCODE_DEBUG` | off | Per-request wire-size stats to stderr |
 | `FASTCODE_API_BASE` | `api.cerebras.ai/v1` | Custom endpoint (proxy/gateway/test) |
 | `FASTCODE_AGENT_DIR` | `~/.fastcode/agent` | Sessions, settings, metrics |
+
+**Update notices:** fastcode is built on the [pi](https://github.com/earendil-works/pi) runtime (`@earendil-works/pi-coding-agent`). Pi's own "new version" banner is suppressed (it suggests `pi update`, which isn't on PATH); the extension shows a fastcode-branded notice instead when a newer pi exists. Upgrade with `npm install @earendil-works/pi-coding-agent@latest` in this repo.
 
 ## Metrics
 
@@ -97,6 +102,7 @@ extensions/fastcode/
   knobs.ts                       # FASTCODE_* env knobs
   metrics.ts                     # JSONL metrics
   logo.ts                        # startup banner
+  version-check.ts               # fastcode-branded pi update notice
 test/                            # unit + mock e2e tests (bun)
 test/eval/                       # real-API eval harness
 ```

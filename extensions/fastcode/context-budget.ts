@@ -1,6 +1,6 @@
-import type { AgentMessage } from "@mariozechner/pi-agent-core"
-import type { TextContent, ToolResultMessage } from "@mariozechner/pi-ai"
-import { estimateTokens, type ExtensionAPI } from "@mariozechner/pi-coding-agent"
+import type { AgentMessage } from "@earendil-works/pi-agent-core"
+import type { TextContent, ToolResultMessage } from "@earendil-works/pi-ai"
+import { estimateTokens, type ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import { logMetrics } from "./metrics"
 import { hardBudgetTokens, keepRecentToolTokens, tightKeepTokens } from "./knobs"
 

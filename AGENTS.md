@@ -1,6 +1,6 @@
 # fastcode-pi
 
-Cerebras-tuned coding harness: a thin extension on `@mariozechner/pi-coding-agent` (pi), launched via `bin/fastcode`. See `README.md` for the why and usage.
+Cerebras-tuned coding harness: a thin extension on `@earendil-works/pi-coding-agent` (pi, formerly `@mariozechner/pi-coding-agent`), launched via `bin/fastcode`. See `README.md` for the why and usage. Pi >= 0.75 needs Node >= 22.19; its `apiKey` provider field takes `$ENV_VAR` interpolation, not a bare env name.
 
 ## Required workflow — tests, commit, push
 

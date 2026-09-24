@@ -35,3 +35,33 @@ export function tightKeepTokens(): number {
 export function maxCompletionTokens(): number {
 	return envInt("FASTCODE_MAX_OUT_TOKENS", fastEnabled() ? 8_192 : 16_384)
 }
+
+// ── quality/speed experiments ──────────────────────────────────────────────
+// Payload-level overrides applied to every provider request, independent of
+// pi's thinkingLevel. FASTCODE_REASONING maps straight to the wire's
+// reasoning_effort — including "off", which Cerebras honors by generating
+// zero reasoning tokens (unlike pi's "off" level, which just omits the param
+// and leaves the server default = thinking ON).
+//
+// WARNING — "off" breaks tool calling on qwen-3.8-27b: verified live that
+// reasoning_effort:"off" + tools returns tool_calls:null and empty content.
+// Only useful for single-shot, tool-free probes. Keep low/medium/high for
+// agentic work (eval: low 8/8 @ 30s, medium 8/8 @ 33.5s, off 2/8).
+export function reasoningEffortOverride(): string | undefined {
+	const raw = process.env.FASTCODE_REASONING?.trim()
+	return raw ? raw : undefined
+}
+
+/** Same override for sub-agent inner requests (explore/delegate/verify). */
+export function subAgentReasoningEffort(): string | undefined {
+	const raw = process.env.FASTCODE_SUBAGENT_REASONING?.trim()
+	return raw ? raw : undefined
+}
+
+/** Optional sampling temperature for all main-loop requests. */
+export function temperatureOverride(): number | undefined {
+	const raw = process.env.FASTCODE_TEMPERATURE
+	if (raw === undefined || raw === "") return undefined
+	const n = parseFloat(raw)
+	return Number.isFinite(n) && n >= 0 ? n : undefined
+}
