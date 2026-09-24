@@ -2,6 +2,7 @@
   "name": "overclock",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "description": "Cerebras-tuned coding harness: pi-coding-agent + overclock extension (context budget, sub-agents)",
   "scripts": {

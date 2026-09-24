@@ -124,3 +124,5 @@ Other notes:
 - Model names (`qwen-3.8-27b`, `gpt-oss-120b`) belong to their respective owners.
 - Using the Cerebras API requires your own API key and is governed by Cerebras's own terms of service and pricing — you're responsible for your usage and costs.
 - Provided **as is, without warranty of any kind**. It's a coding agent: it edits files and runs commands on your machine. Review its actions; use at your own risk.
+
+overclock itself is [MIT-licensed](LICENSE).
