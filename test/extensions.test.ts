@@ -109,7 +109,7 @@ check("/exit command registered", exitCmd !== undefined)
 // --- logo banner ---
 const lines = logoLines()
 const joined = lines.join("\n")
-check("logo renders 5 art rows + tagline + padding", lines.length === 8)
+check("logo renders 5 art rows + tagline + disclaimer + padding", lines.length === 9)
 check("logo has italic ANSI on over", joined.includes("\x1b[3m") && joined.includes("\x1b[23m"))
 check("logo contains both words' glyphs", joined.includes("_____  _____") && joined.includes("\\___|_|"))
 

@@ -10,6 +10,8 @@
 
 **A minimal coding-agent harness tuned for Cerebras fast inference.**
 
+*A personal project — not affiliated with, endorsed by, or sponsored by Cerebras Systems, Inc. See [Disclaimer](#disclaimer).*
+
 ## Why?
 
 Cerebras serves models like `qwen-3.8-27b` at ~2,000 output tokens/sec — fast enough that the *harness* becomes the bottleneck. Heavier coding agents are built for slow inference: big fixed system prompts, sprawling tool surfaces, and context compaction that forces expensive re-reads (or worse, re-fetch loops where the model re-downloads files it already saw).
@@ -68,7 +70,6 @@ Exit with `/exit`, `/quit`, or Ctrl-D — the session-resume hint printed on exi
 | `OVERCLOCK_API_BASE` | `api.cerebras.ai/v1` | Custom endpoint (proxy/gateway/test) |
 | `OVERCLOCK_AGENT_DIR` | `~/.overclock/agent` | Sessions, settings, metrics. `OVERCLOCK_CODING_AGENT_DIR` / `PI_CODING_AGENT_DIR` also honored (pi's own vars) |
 
-> **Renamed from fastcode:** the legacy `FASTCODE_*` env vars, `~/.config/fastcode/env`, and `~/.fastcode/agent` are still honored — `~/.fastcode` is auto-migrated on first run and `OVERCLOCK_*` wins when both are set.
 
 **Update notices:** overclock is built on the [pi](https://github.com/earendil-works/pi) runtime (`@earendil-works/pi-coding-agent`). Pi's own "new version" banner is suppressed; the extension shows an overclock-branded notice instead when a newer pi exists. Upgrade with `npm install @earendil-works/pi-coding-agent@latest` in this repo.
 
@@ -112,3 +113,14 @@ extensions/overclock/
 test/                            # unit + mock e2e tests (bun)
 test/eval/                       # real-API eval harness
 ```
+
+## Disclaimer
+
+overclock is a **personal, independent project**. It is not affiliated with, endorsed by, sponsored by, or supported by **Cerebras Systems, Inc.** — "Cerebras" is a trademark of Cerebras Systems, Inc., used here only to describe the public inference API this tool calls. It is not an official Cerebras product, and Cerebras does not provide support for it.
+
+Other notes:
+
+- Built on the third-party [pi](https://github.com/earendil-works/pi) runtime — a separate project, likewise unaffiliated with Cerebras.
+- Model names (`qwen-3.8-27b`, `gpt-oss-120b`) belong to their respective owners.
+- Using the Cerebras API requires your own API key and is governed by Cerebras's own terms of service and pricing — you're responsible for your usage and costs.
+- Provided **as is, without warranty of any kind**. It's a coding agent: it edits files and runs commands on your machine. Review its actions; use at your own risk.

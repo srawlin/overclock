@@ -28,6 +28,7 @@ const CLOCK = [
 ]
 
 const TAGLINE = "Cerebras-fast coding agent"
+const DISCLAIMER = "personal project — not affiliated with Cerebras"
 
 /** Logo lines with ANSI styling applied (over = italic, tagline = dim). */
 export function logoLines(): string[] {
@@ -35,6 +36,7 @@ export function logoLines(): string[] {
 		"",
 		...OVER.map((line, i) => `${ITALIC}${line}${ITALIC_OFF}${CLOCK[i]}`),
 		`    ${DIM}${TAGLINE}${RESET}`,
+		`    ${DIM}${DISCLAIMER}${RESET}`,
 		"",
 	]
 }
