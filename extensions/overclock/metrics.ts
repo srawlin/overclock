@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync } from "node:fs"
+import { appendFileSync, chmodSync, mkdirSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
@@ -24,6 +24,9 @@ export function initMetrics() {
 		"logs",
 	)
 	mkdirSync(dir, { recursive: true })
+	try {
+		chmodSync(dir, 0o700) // logs live under the agent dir — owner-only (F6)
+	} catch {}
 	file = join(dir, `metrics-${new Date().toISOString().replace(/[:.]/g, "-")}-${process.pid}.jsonl`)
 }
 

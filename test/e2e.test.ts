@@ -8,7 +8,7 @@
 
 import { spawn, spawnSync } from "node:child_process"
 import { createServer, type Server } from "node:http"
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -49,6 +49,23 @@ function sse(): string {
 	check("--version prints something", ((r.stdout ?? "") + (r.stderr ?? "")).trim().length > 0)
 }
 
+// --- 1a. F3: invoking through a symlink resolves HERE to the repo ---
+{
+	const linkDir = mkdtempSync(join(tmpdir(), "overclock-e2e-link-"))
+	const link = join(linkDir, "overclock")
+	symlinkSync(BIN, link)
+	const r = spawnSync(link, ["--version"], { encoding: "utf8", timeout: 20_000, stdio: ["ignore", "pipe", "pipe"] })
+	check("symlinked --version exits 0", r.status === 0, `status=${r.status} stderr=${r.stderr?.slice(0, 200)}`)
+	check("symlinked run uses bundled pi (no PATH fallback)", !(r.stderr ?? "").includes("using pi from PATH"), r.stderr?.slice(0, 200))
+	rmSync(linkDir, { recursive: true, force: true })
+}
+
+// --- 1a2. F8: --safe is consumed by the launcher (pi would reject it) ---
+{
+	const r = spawnSync(BIN, ["--safe", "--version"], { encoding: "utf8", timeout: 20_000, stdio: ["ignore", "pipe", "pipe"] })
+	check("--safe --version exits 0 (flag consumed)", r.status === 0, `status=${r.status} stderr=${r.stderr?.slice(0, 200)}`)
+}
+
 // --- 1b. rebrand: --help addresses "overclock", pi's package.json is piConfig-patched ---
 {
 	const r = spawnSync(BIN, ["--help"], { encoding: "utf8", timeout: 20_000, stdio: ["ignore", "pipe", "pipe"] })
@@ -73,10 +90,12 @@ function sse(): string {
 
 // --- 2. full loop against mock SSE server ---
 const home = mkdtempSync(join(tmpdir(), "overclock-e2e-home-"))
+const hostileDir = mkdtempSync(join(tmpdir(), "overclock-e2e-env-"))
 const agentDir = join(home, "agent")
 let posts = 0
 let sawAuth = false
 let sawClearThinking = false
+let lastAuth: string | undefined
 let lastPayload: Record<string, unknown> | undefined
 
 const server: Server = createServer((req, res) => {
@@ -89,7 +108,8 @@ const server: Server = createServer((req, res) => {
 	req.on("data", (c) => (body += c))
 	req.on("end", () => {
 		posts++
-		sawAuth ||= (req.headers.authorization ?? "").includes("Bearer")
+		lastAuth = req.headers.authorization as string | undefined
+		sawAuth ||= (lastAuth ?? "").includes("Bearer")
 		try {
 			lastPayload = JSON.parse(body)
 			if (lastPayload && (lastPayload as any).clear_thinking === true) sawClearThinking = true
@@ -129,6 +149,17 @@ try {
 
 	check("mock received a POST", posts >= 1, `posts=${posts} stderr=${r.stderr?.slice(-400)}`)
 	check("request carried Authorization header", sawAuth)
+	check("key resolved via !command file (Bearer test-key)", lastAuth === "Bearer test-key", `auth=${lastAuth}`)
+
+	// --- 2b. F2/F6: key landed in a 0600 file, agent dir is 0700 ---
+	{
+		const keyFile = join(home, ".config", "overclock", "key")
+		check("key file written", existsSync(keyFile))
+		check("key file mode 0600", existsSync(keyFile) && (statSync(keyFile).mode & 0o777) === 0o600, `mode=${existsSync(keyFile) ? (statSync(keyFile).mode & 0o777).toString(8) : "n/a"}`)
+		check("key file holds the key", existsSync(keyFile) && readFileSync(keyFile, "utf8") === "test-key")
+		check("agent dir mode 0700", (statSync(agentDir).mode & 0o777) === 0o700, `mode=${(statSync(agentDir).mode & 0o777).toString(8)}`)
+	}
+
 	check("clear_thinking applied to wire payload", sawClearThinking)
 	check("model id reaches wire", (lastPayload?.model as string | undefined)?.includes("qwen") === true, JSON.stringify(lastPayload?.model))
 	check("e2e run exits 0", r.status === 0, `status=${r.status} stderr=${r.stderr?.slice(-400)}`)
@@ -158,9 +189,40 @@ try {
 	check("usage echoes mock totals", usage?.input === 42 && usage?.output === 4, JSON.stringify(usage))
 	const turn = lines.find((l) => l.kind === "turn")
 	check("turn record has latency fields", typeof turn?.firstTokenMs === "number" && typeof turn?.tokensPerSec === "number", JSON.stringify(turn))
+
+	// --- 4. F1: a hostile repo-local .env must not execute code or override
+	// config — only CEREBRAS_API_KEY may be parsed out of it ---
+	const pwnFile = join(hostileDir, "pwned")
+	writeFileSync(
+		join(hostileDir, ".env"),
+		[
+			"PWNED=$(touch " + pwnFile + ")",
+			"touch " + pwnFile,
+			"OVERCLOCK_API_BASE=http://127.0.0.1:1/evil",
+			"CEREBRAS_API_KEY=dotenv-key",
+		].join("\n") + "\n",
+	)
+	{
+		// no CEREBRAS_API_KEY in env → launcher must parse (not source) ./.env
+		const { CEREBRAS_API_KEY: _drop, ...env2 } = env
+		const postsBefore = posts
+		const r2 = await new Promise<{ status: number | null; stdout: string; stderr: string }>((res) => {
+			const c = spawn(BIN, ["-p", "say hi"], { env: env2, cwd: hostileDir, stdio: ["ignore", "pipe", "pipe"] })
+			let stdout = ""
+			let stderr = ""
+			c.stdout.on("data", (d) => (stdout += d))
+			c.stderr.on("data", (d) => (stderr += d))
+			c.on("exit", (status) => res({ status, stdout, stderr }))
+			setTimeout(() => c.kill("SIGKILL"), 90_000)
+		})
+		check("hostile .env: no code executed", !existsSync(pwnFile))
+		check("hostile .env: request still reached the mock (API_BASE not overridden)", posts > postsBefore, `posts=${posts} stderr=${r2.stderr?.slice(-300)}`)
+		check("hostile .env: key parsed and sent", lastAuth === "Bearer dotenv-key", `auth=${lastAuth}`)
+	}
 } finally {
 	server.close()
 	rmSync(home, { recursive: true, force: true })
+	rmSync(hostileDir, { recursive: true, force: true })
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)

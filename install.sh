@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # overclock installer
-#   curl -fsSL https://raw.githubusercontent.com/srawlin/overclock/dev/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/srawlin/overclock/main/install.sh | bash
 #
 # What it does:
 #   1. clones (or updates) the repo into ~/.local/share/overclock
@@ -13,7 +13,7 @@ set -euo pipefail
 
 REPO_HTTPS="https://github.com/srawlin/overclock.git"
 REPO_SSH="git@github.com:srawlin/overclock.git"
-BRANCH="${OVERCLOCK_BRANCH:-${FASTCODE_BRANCH:-dev}}"
+BRANCH="${OVERCLOCK_BRANCH:-${FASTCODE_BRANCH:-main}}"
 DEST="${OVERCLOCK_HOME:-$HOME/.local/share/overclock}"
 BIN_DIR="${OVERCLOCK_BIN_DIR:-$HOME/.local/bin}"
 
@@ -36,7 +36,7 @@ node_ok || fail "node >= 22.19 required — install from https://nodejs.org or v
 
 # --- clone or update --------------------------------------------------------
 if [ -d "$DEST/.git" ]; then
-	say "updating $DEST"
+	say "updating $DEST (local changes are discarded)"
 	git -C "$DEST" fetch --quiet origin "$BRANCH"
 	git -C "$DEST" reset --hard --quiet "origin/$BRANCH"
 else
@@ -53,10 +53,19 @@ fi
 
 # --- deps -------------------------------------------------------------------
 say "installing dependencies"
-(cd "$DEST" && npm install --omit=dev --no-fund --no-audit --loglevel=error)
+# npm ci installs exactly the lockfile — fails on drift rather than resolving
+# fresh ranges. Audit output is kept so advisories surface (F9).
+(cd "$DEST" && npm ci --omit=dev --no-fund --loglevel=error)
 
 # --- link -------------------------------------------------------------------
 mkdir -p "$BIN_DIR"
+# Don't silently clobber an unrelated regular file at the link target (F14).
+if [ -f "$BIN_DIR/overclock" ] && [ ! -L "$BIN_DIR/overclock" ]; then
+	case "$(head -c 200 "$BIN_DIR/overclock" 2>/dev/null)" in
+		*overclock*) ;;
+		*) fail "$BIN_DIR/overclock exists and isn't ours — move it aside or set OVERCLOCK_BIN_DIR" ;;
+	esac
+fi
 ln -sf "$DEST/bin/overclock" "$BIN_DIR/overclock"
 chmod +x "$DEST/bin/overclock"
 
@@ -78,15 +87,20 @@ LEGACY_ENV_FILE="$HOME/.config/fastcode/env"
 if [ -n "${CEREBRAS_API_KEY:-}" ] || grep -qs "CEREBRAS_API_KEY" "$ENV_FILE" 2>/dev/null; then
 	: # already configured
 elif grep -qs "CEREBRAS_API_KEY" "$LEGACY_ENV_FILE" 2>/dev/null; then
-	# carry the key forward to the renamed location
+	# carry the key forward to the renamed location — lock down perms, the
+	# source may be world-readable (F6)
 	mkdir -p "$(dirname "$ENV_FILE")"
+	chmod 700 "$(dirname "$ENV_FILE")"
 	cp "$LEGACY_ENV_FILE" "$ENV_FILE"
+	chmod 600 "$ENV_FILE"
 	say "migrated config from $LEGACY_ENV_FILE -> $ENV_FILE"
 elif [ -r /dev/tty ]; then
 	printf '  CEREBRAS_API_KEY (from https://cloud.cerebras.ai): ' > /dev/tty
-	read -r KEY < /dev/tty || true
+	read -rs KEY < /dev/tty || true
+	printf '\n' > /dev/tty
 	if [ -n "${KEY:-}" ]; then
 		mkdir -p "$(dirname "$ENV_FILE")"
+		chmod 700 "$(dirname "$ENV_FILE")"
 		printf 'CEREBRAS_API_KEY=%s\n' "$KEY" > "$ENV_FILE"
 		chmod 600 "$ENV_FILE"
 		say "saved key to $ENV_FILE"

@@ -2,7 +2,15 @@
 # overclock — pi-coding-agent harness tuned for Cerebras (small-context model, fast inference)
 set -euo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolve symlinks — the installer links ~/.local/bin/overclock -> here, and
+# BASH_SOURCE reports the link path, not the target (F3).
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+	dir="$(cd "$(dirname "$SOURCE")" && pwd)"
+	SOURCE="$(readlink "$SOURCE")"
+	[[ "$SOURCE" != /* ]] && SOURCE="$dir/$SOURCE"
+done
+HERE="$(cd "$(dirname "$SOURCE")/.." && pwd)"
 
 # One-time rename migration: adopt the old fastcode state dir if it exists.
 if [ ! -d "$HOME/.overclock" ] && [ -d "$HOME/.fastcode" ]; then
@@ -18,6 +26,8 @@ AGENT_DIR="${OVERCLOCK_CODING_AGENT_DIR:-${PI_CODING_AGENT_DIR:-${OVERCLOCK_AGEN
 export OVERCLOCK_CODING_AGENT_DIR="$AGENT_DIR"
 export PI_CODING_AGENT_DIR="$AGENT_DIR"
 mkdir -p "$AGENT_DIR"
+# Session transcripts record file contents verbatim — keep the dir owner-only (F6).
+chmod 700 "$HOME/.overclock" "$AGENT_DIR" 2>/dev/null || true
 
 # First-run defaults; user-editable afterwards.
 if [ ! -f "$AGENT_DIR/settings.json" ]; then
@@ -31,14 +41,60 @@ if [ ! -f "$AGENT_DIR/settings.json" ]; then
 JSON
 fi
 
-# API key: existing env wins, else source ~/.config/overclock/env (legacy:
-# ~/.config/fastcode/env), else .env in cwd.
+# API key: existing env wins, else ~/.config/overclock/env (legacy:
+# ~/.config/fastcode/env), else CEREBRAS_API_KEY parsed from ./.env.
+#
+# The ~/.config files are user-controlled (same trust as ~/.zshrc), so they are
+# sourced — arbitrary OVERCLOCK_* knobs work there. A repo-local .env is NOT
+# safe to execute: it would run attacker code at launch, and could silently set
+# OVERCLOCK_API_BASE to redirect requests (and the key) to a hostile endpoint
+# (F1). Parse the key out of it instead — the file can never supply anything
+# else, and it can never override a key already configured by the user.
 if [ -z "${CEREBRAS_API_KEY:-}" ]; then
-	for f in "$HOME/.config/fastcode/env" "$HOME/.config/overclock/env" "./.env"; do
+	for f in "$HOME/.config/fastcode/env" "$HOME/.config/overclock/env"; do
 		if [ -f "$f" ]; then
 			set -a; . "$f"; set +a
 		fi
 	done
+	if [ -z "${CEREBRAS_API_KEY:-}" ] && [ -f ./.env ]; then
+		while IFS= read -r line || [ -n "$line" ]; do
+			line="${line#"${line%%[![:space:]]*}"}"
+			case "$line" in
+				CEREBRAS_API_KEY=*|export\ CEREBRAS_API_KEY=*)
+					val="${line#*=}"
+					val="${val#"${val%%[![:space:]]*}"}"
+					val="${val%"${val##*[![:space:]]}"}"
+					case "$val" in
+						\"*\") val="${val#\"}"; val="${val%\"}" ;;
+						\'*\') val="${val#\'}"; val="${val%\'}" ;;
+					esac
+					if [ -n "$val" ]; then
+						export CEREBRAS_API_KEY="$val"
+						break
+					fi
+					;;
+			esac
+		done < ./.env
+	fi
+fi
+
+# F2: keep the API key out of the agent's environment. Every command the bash
+# tool spawns inherits process.env, so a key stored there is one `env` (or one
+# repo script / prompt-injected command) away from exfiltration. pi instead
+# resolves the provider key via a `!command` — env var first (non-launcher
+# usage), else this 0600 file. Once the file provably holds the key, drop the
+# env var so nothing spawned from here can see it.
+if [ -n "${CEREBRAS_API_KEY:-}" ]; then
+	CONF_DIR="$HOME/.config/overclock"
+	KEY_FILE="$CONF_DIR/key"
+	mkdir -p "$CONF_DIR" 2>/dev/null
+	chmod 700 "$CONF_DIR" 2>/dev/null
+	if [ "$(cat "$KEY_FILE" 2>/dev/null)" != "$CEREBRAS_API_KEY" ]; then
+		printf %s "$CEREBRAS_API_KEY" > "$KEY_FILE" 2>/dev/null
+	fi
+	if [ "$(cat "$KEY_FILE" 2>/dev/null)" = "$CEREBRAS_API_KEY" ] && chmod 600 "$KEY_FILE" 2>/dev/null; then
+		unset CEREBRAS_API_KEY
+	fi
 fi
 
 # pi's own update banner names "pi" and suggests `pi update` — confusing under
@@ -75,9 +131,30 @@ for ((i=1; i<=$#; i++)); do
 	esac
 done
 
-# Prefer the pinned dependency; fall back to a pi on PATH.
+# --safe: read-only mode for untrusted repos — drops every tool that can write
+# files or execute commands (F8). Consumed here; pi never sees the flag. Args
+# after `--` are prompt text, not flags.
+TOOLS="read,write,edit,bash,grep,find,ls,explore,delegate,verify"
+filtered=()
+seen_dd=0
+for arg in "$@"; do
+	[ "$arg" = "--" ] && seen_dd=1
+	if [ "$seen_dd" = 0 ] && [ "$arg" = "--safe" ]; then
+		TOOLS="read,grep,find,ls,explore"
+		continue
+	fi
+	filtered+=("$arg")
+done
+set -- ${filtered[@]+"${filtered[@]}"}
+
+# Prefer the pinned dependency. Falling back to a PATH pi means either deps are
+# missing or HERE resolved wrong — warn, since a random PATH binary is both a
+# version risk and a hijack surface (F3).
 PI="$HERE/node_modules/.bin/pi"
-[ -x "$PI" ] || PI="$(command -v pi || true)"
+if [ ! -x "$PI" ]; then
+	PI="$(command -v pi || true)"
+	[ -n "$PI" ] && echo "overclock: warning: using pi from PATH ($PI) — expected $HERE/node_modules/.bin/pi" >&2
+fi
 if [ -z "$PI" ]; then
 	echo "overclock: pi not found — run 'npm install' in $HERE or install @earendil-works/pi-coding-agent" >&2
 	exit 1
@@ -86,5 +163,5 @@ fi
 exec "$PI" \
 	--extension "$HERE/extensions/overclock" \
 	--model "${OVERCLOCK_MODEL:-${FASTCODE_MODEL:-cerebras/qwen-3.8-27b}}" \
-	--tools read,write,edit,bash,grep,find,ls,explore,delegate,verify \
+	--tools "$TOOLS" \
 	"$@"
