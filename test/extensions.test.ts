@@ -41,7 +41,9 @@ check("verify returns PASS/FAIL contract", verify.description.includes("PASS or 
 check("verify takes task + files params", "task" in (verify.parameters?.properties ?? {}) && "files" in verify.parameters.properties)
 check("verify positioned as independent checker", verify.promptGuidelines.some((g: string) => g.includes("fresh agent")))
 
-// --- item 5: explore model flag ---
+// --- explore model routing ---
+// Invariant: the MAIN session's model is never re-routed mid-task. Only
+// sub-agents may use a different model, and only `explore` has a default.
 const mainModel = { provider: "cerebras", id: "qwen-3.8-27b" }
 const ossModel = { provider: "cerebras", id: "gpt-oss-120b" }
 const ctx = {
@@ -49,15 +51,21 @@ const ctx = {
 	modelRegistry: { find: (p: string, id: string) => (p === "cerebras" && id === "gpt-oss-120b" ? ossModel : undefined) },
 } as any
 
+// Default: explore → cheaper search model; delegate/verify → main model.
 delete process.env.FASTCODE_EXPLORE_MODEL
-check("no flag → ctx.model", resolveSubAgentModel(ctx, "explore") === mainModel)
-check("flag ignored for delegate", resolveSubAgentModel(ctx, "delegate") === mainModel)
+check("default: explore → gpt-oss-120b", resolveSubAgentModel(ctx, "explore") === ossModel)
+check("invariant: delegate never re-routed", resolveSubAgentModel(ctx, "delegate") === mainModel)
+check("invariant: verify never re-routed", resolveSubAgentModel(ctx, "verify") === mainModel)
+
+// Env escape hatches.
+process.env.FASTCODE_EXPLORE_MODEL = ""
+check("empty env → fall back to main model (escape hatch)", resolveSubAgentModel(ctx, "explore") === mainModel)
 process.env.FASTCODE_EXPLORE_MODEL = "gpt-oss-120b"
-check("flag → gpt-oss-120b for explore", resolveSubAgentModel(ctx, "explore") === ossModel)
+check("flag id form → gpt-oss-120b", resolveSubAgentModel(ctx, "explore") === ossModel)
 process.env.FASTCODE_EXPLORE_MODEL = "cerebras/gpt-oss-120b"
-check("provider/id form works", resolveSubAgentModel(ctx, "explore") === ossModel)
+check("flag provider/id form works", resolveSubAgentModel(ctx, "explore") === ossModel)
 process.env.FASTCODE_EXPLORE_MODEL = "nonexistent-model"
-check("unknown model falls back to ctx.model", resolveSubAgentModel(ctx, "explore") === mainModel)
+check("unknown flag id falls back to ctx.model", resolveSubAgentModel(ctx, "explore") === mainModel)
 delete process.env.FASTCODE_EXPLORE_MODEL
 
 // --- /exit command (regression: pi only ships /quit — /exit used to go to the model) ---

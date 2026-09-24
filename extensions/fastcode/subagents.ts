@@ -60,13 +60,55 @@ function errorResult(text: string): AgentToolResult<SubAgentDetails> {
 type SubAgentName = "explore" | "delegate" | "verify"
 type Toolset = "read-only" | "coding" | "verify"
 
-/** Model routing per sub-agent role. FASTCODE_EXPLORE_MODEL overrides the
- *  model used for explore agents (accepts "id" or "provider/id") — e.g.
- *  gpt-oss-120b at ~4x cheaper input for what is fundamentally search work. */
+// ─────────────────────────────────────────────────────────────────────────────
+// MODEL-ROUTING INVARIANT (do not break):
+//
+//   The main conversation's model is fixed for the lifetime of a session. Only
+//   SUB-AGENTS may be routed to a different model, and their context is fully
+//   isolated (see runSubAgent: fresh Agent instance, no shared transcript).
+//
+//   Why: Cerebras (and most providers) key prefix-cache entries on the literal
+//   token prefix AND the model id. The main session's cache is its largest, most
+//   valuable cost asset — it goes cold the instant the main model changes, and
+//   the next turn re-sends every token from scratch. Routing sub-agents alone
+//   is safe because a sub-agent's cache and the main session's cache are
+//   different keys anyway, and only the sub-agent's final summary text flows
+//   back to the main context as a single tool result.
+//
+//   Consequence: there is NO supported way to switch the main model mid-task.
+//   If you find yourself wanting that (cheaper model for a heavy read phase,
+//   for example), the correct refactor is to do the heavy reading in the
+//   explore sub-agent (already cheap by default) and let the main model resume
+//   the conversation against its still-warm cache.
+//
+//   Do not add a --main-model-mid-session flag, an env var, or a /slash command
+//   that reassigns the main session's model. The eval (add-feature task)
+//   already shows a mid-session model swap hurts pass rate, and it would also
+//   silently invalidate the main session's prefix cache.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Default model for the read-only explore sub-agent. Cheap and fast for what is
+// fundamentally search work (grep → read ranges → summarize); ~4x cheaper input
+// than the main 27b model on Cerebras. Only SUB-AGENTS are ever re-routed (see
+// the invariant above); the main session model is never changed mid-task.
+const DEFAULT_EXPLORE_MODEL = "gpt-oss-120b"
+
+/** Model routing per sub-agent role. Explore defaults to a cheaper, faster
+ *  search-oriented model; env vars below let callers tune or disable it.
+ *
+ *  FASTCODE_EXPLORE_MODEL:
+ *    (unset)  → DEFAULT_EXPLORE_MODEL (gpt-oss-120b by default)
+ *    ""       → fall back to ctx.model (the main model; explicit escape hatch)
+ *    "id" or "provider/id" → resolve via the model registry
+ *
+ *  Accepts both "id" and "provider/id" forms; unknown ids fall back to
+ *  ctx.model so a typo can't brick the tool. */
 export function resolveSubAgentModel(ctx: ExtensionContext, name: SubAgentName) {
-	const override = name === "explore" ? process.env.FASTCODE_EXPLORE_MODEL : undefined
-	if (!override) return ctx.model
-	const [provider, id] = override.includes("/") ? override.split("/", 2) : ["cerebras", override]
+	if (name !== "explore") return ctx.model
+	const raw = process.env.FASTCODE_EXPLORE_MODEL
+	const ref = raw === undefined ? DEFAULT_EXPLORE_MODEL : raw
+	if (ref === "") return ctx.model // explicit escape: use main model
+	const [provider, id] = ref.includes("/") ? ref.split("/", 2) : ["cerebras", ref]
 	return ctx.modelRegistry.find(provider, id) ?? ctx.model
 }
 

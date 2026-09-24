@@ -56,7 +56,7 @@ Exit with `/exit`, `/quit`, or Ctrl-D.
 |---|---|---|
 | `CEREBRAS_API_KEY` | — | Required. Or put it in `~/.config/fastcode/env` |
 | `FASTCODE_MODEL` | `cerebras/qwen-3.8-27b` | Main agent model |
-| `FASTCODE_EXPLORE_MODEL` | same as main | Route `explore` to e.g. `gpt-oss-120b` (4× cheaper search) |
+| `FASTCODE_EXPLORE_MODEL` | `gpt-oss-120b` | Route `explore` to a cheaper search model (default). Set to `""` to run explore on the main model. Only the *main* model is per-session; sub-agent model routing is cache-safe. |
 | `FASTCODE_FAST` | off | Aggressive preset: tighter keep window, 8k output cap |
 | `FASTCODE_KEEP_TOKENS` / `_HARD_BUDGET_TOKENS` / `_TIGHT_KEEP_TOKENS` / `_MAX_OUT_TOKENS` | 16k / 80k / 4k / 16k | Individual context/output knobs (override the preset) |
 | `FASTCODE_DEBUG` | off | Per-request wire-size stats to stderr |
