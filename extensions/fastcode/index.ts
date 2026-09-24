@@ -68,6 +68,19 @@ export default function fastcode(pi: ExtensionAPI) {
 	installProviderTuning(pi)
 	registerSubAgentTools(pi)
 
+	// pi's built-in exit is /quit (or Ctrl-D); /exit is not a command and would
+	// otherwise be submitted to the model as a literal prompt — the agent runs a
+	// turn, then sits idle forever looking like a hung exit.
+	// shutdown() sets shutdownRequested and exits immediately when idle; abort()
+	// ends an in-flight turn so agent_end triggers the deferred shutdown.
+	pi.registerCommand("exit", {
+		description: "Exit fastcode",
+		handler: async (_args, ctx) => {
+			ctx.shutdown()
+			if (!ctx.isIdle()) ctx.abort()
+		},
+	})
+
 	// FASTCODE_DEBUG=1 logs the outgoing request size each turn.
 	pi.on("before_provider_request", (event, ctx) => {
 		captureSession(ctx)

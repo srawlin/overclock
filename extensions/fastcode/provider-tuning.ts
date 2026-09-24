@@ -37,7 +37,11 @@ export async function paceRequest(estimatedTokens: number): Promise<void> {
 		const delay = Math.min(wake - now, MAX_SLEEP_MS)
 		if (delay > 0) {
 			logMetrics({ kind: "pace", delayMs: delay, windowTokens: used })
-			await new Promise((resolve) => setTimeout(resolve, delay))
+			await new Promise((resolve) => {
+				const timer = setTimeout(resolve, delay)
+				// A pending pace must not hold the process open on shutdown.
+				;(timer as unknown as { unref?: () => void }).unref?.()
+			})
 		}
 	}
 	window.push({ ts: Date.now(), tokens: estimatedTokens })
