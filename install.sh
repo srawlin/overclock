@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # overclock installer
-#   curl -fsSL https://raw.githubusercontent.com/srawlin/overclock/dev/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/srawlin/overclock/main/install.sh | bash
 #
 # What it does:
 #   1. clones (or updates) the repo into ~/.local/share/overclock
@@ -13,7 +13,7 @@ set -euo pipefail
 
 REPO_HTTPS="https://github.com/srawlin/overclock.git"
 REPO_SSH="git@github.com:srawlin/overclock.git"
-BRANCH="${OVERCLOCK_BRANCH:-${FASTCODE_BRANCH:-dev}}"
+BRANCH="${OVERCLOCK_BRANCH:-${FASTCODE_BRANCH:-main}}"
 DEST="${OVERCLOCK_HOME:-$HOME/.local/share/overclock}"
 BIN_DIR="${OVERCLOCK_BIN_DIR:-$HOME/.local/bin}"
 
