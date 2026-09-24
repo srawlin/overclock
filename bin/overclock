@@ -2,7 +2,15 @@
 # overclock — pi-coding-agent harness tuned for Cerebras (small-context model, fast inference)
 set -euo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolve symlinks — the installer links ~/.local/bin/overclock -> here, and
+# BASH_SOURCE reports the link path, not the target (F3).
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+	dir="$(cd "$(dirname "$SOURCE")" && pwd)"
+	SOURCE="$(readlink "$SOURCE")"
+	[[ "$SOURCE" != /* ]] && SOURCE="$dir/$SOURCE"
+done
+HERE="$(cd "$(dirname "$SOURCE")/.." && pwd)"
 
 # One-time rename migration: adopt the old fastcode state dir if it exists.
 if [ ! -d "$HOME/.overclock" ] && [ -d "$HOME/.fastcode" ]; then
@@ -31,14 +39,41 @@ if [ ! -f "$AGENT_DIR/settings.json" ]; then
 JSON
 fi
 
-# API key: existing env wins, else source ~/.config/overclock/env (legacy:
-# ~/.config/fastcode/env), else .env in cwd.
+# API key: existing env wins, else ~/.config/overclock/env (legacy:
+# ~/.config/fastcode/env), else CEREBRAS_API_KEY parsed from ./.env.
+#
+# The ~/.config files are user-controlled (same trust as ~/.zshrc), so they are
+# sourced — arbitrary OVERCLOCK_* knobs work there. A repo-local .env is NOT
+# safe to execute: it would run attacker code at launch, and could silently set
+# OVERCLOCK_API_BASE to redirect requests (and the key) to a hostile endpoint
+# (F1). Parse the key out of it instead — the file can never supply anything
+# else, and it can never override a key already configured by the user.
 if [ -z "${CEREBRAS_API_KEY:-}" ]; then
-	for f in "$HOME/.config/fastcode/env" "$HOME/.config/overclock/env" "./.env"; do
+	for f in "$HOME/.config/fastcode/env" "$HOME/.config/overclock/env"; do
 		if [ -f "$f" ]; then
 			set -a; . "$f"; set +a
 		fi
 	done
+	if [ -z "${CEREBRAS_API_KEY:-}" ] && [ -f ./.env ]; then
+		while IFS= read -r line || [ -n "$line" ]; do
+			line="${line#"${line%%[![:space:]]*}"}"
+			case "$line" in
+				CEREBRAS_API_KEY=*|export\ CEREBRAS_API_KEY=*)
+					val="${line#*=}"
+					val="${val#"${val%%[![:space:]]*}"}"
+					val="${val%"${val##*[![:space:]]}"}"
+					case "$val" in
+						\"*\") val="${val#\"}"; val="${val%\"}" ;;
+						\'*\') val="${val#\'}"; val="${val%\'}" ;;
+					esac
+					if [ -n "$val" ]; then
+						export CEREBRAS_API_KEY="$val"
+						break
+					fi
+					;;
+			esac
+		done < ./.env
+	fi
 fi
 
 # pi's own update banner names "pi" and suggests `pi update` — confusing under
@@ -75,9 +110,14 @@ for ((i=1; i<=$#; i++)); do
 	esac
 done
 
-# Prefer the pinned dependency; fall back to a pi on PATH.
+# Prefer the pinned dependency. Falling back to a PATH pi means either deps are
+# missing or HERE resolved wrong — warn, since a random PATH binary is both a
+# version risk and a hijack surface (F3).
 PI="$HERE/node_modules/.bin/pi"
-[ -x "$PI" ] || PI="$(command -v pi || true)"
+if [ ! -x "$PI" ]; then
+	PI="$(command -v pi || true)"
+	[ -n "$PI" ] && echo "overclock: warning: using pi from PATH ($PI) — expected $HERE/node_modules/.bin/pi" >&2
+fi
 if [ -z "$PI" ]; then
 	echo "overclock: pi not found — run 'npm install' in $HERE or install @earendil-works/pi-coding-agent" >&2
 	exit 1

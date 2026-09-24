@@ -84,7 +84,8 @@ elif grep -qs "CEREBRAS_API_KEY" "$LEGACY_ENV_FILE" 2>/dev/null; then
 	say "migrated config from $LEGACY_ENV_FILE -> $ENV_FILE"
 elif [ -r /dev/tty ]; then
 	printf '  CEREBRAS_API_KEY (from https://cloud.cerebras.ai): ' > /dev/tty
-	read -r KEY < /dev/tty || true
+	read -rs KEY < /dev/tty || true
+	printf '\n' > /dev/tty
 	if [ -n "${KEY:-}" ]; then
 		mkdir -p "$(dirname "$ENV_FILE")"
 		printf 'CEREBRAS_API_KEY=%s\n' "$KEY" > "$ENV_FILE"

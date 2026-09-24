@@ -22,28 +22,37 @@ configured LLM endpoint. The three boundaries that matter:
 
 ## Findings summary
 
-| ID  | Severity | Issue |
-|-----|----------|-------|
-| F1  | HIGH     | `bin/overclock` executes `./.env` from the cwd as shell code |
-| F2  | HIGH     | `CEREBRAS_API_KEY` (and all env secrets) inherited by every agent-run command |
-| F3  | MEDIUM   | Symlinked install resolves wrong root; falls back to PATH `pi` |
-| F4  | MEDIUM   | Installer reads API key with terminal echo on |
-| F5  | MEDIUM   | `OVERCLOCK_API_BASE` unvalidated — arbitrary/plain-HTTP endpoint |
-| F6  | MEDIUM   | Agent state dir and transcripts created with default (world-readable) perms |
-| F7  | MEDIUM   | `verify`/`delegate` sub-agent bash is unrestricted; "read-only" is prompt-only |
-| F8  | MEDIUM   | No prompt-injection or untrusted-repo guardrails (documented risk) |
-| F9  | MEDIUM   | Installer/update supply chain (`curl\|bash`, `npm install`, `reset --hard`) |
-| F10 | LOW      | `.env` not in `.gitignore` — API key committable |
-| F11 | LOW      | `postinstall.mjs` mutates `node_modules` after npm integrity checks |
-| F12 | LOW      | Version check phones home to pi.dev on every session start |
-| F13 | LOW      | No sub-agent turn/time/token cap — unbounded spend possible |
-| F14 | LOW      | Hygiene: stale `bin/` gitignore rule; `ln -sf` clobbers existing files |
+| ID  | Severity | Issue | Status |
+|-----|----------|-------|--------|
+| F1  | HIGH     | `bin/overclock` executes `./.env` from the cwd as shell code | **Fixed** |
+| F2  | HIGH     | `CEREBRAS_API_KEY` (and all env secrets) inherited by every agent-run command | Open |
+| F3  | MEDIUM   | Symlinked install resolves wrong root; falls back to PATH `pi` | **Fixed** |
+| F4  | MEDIUM   | Installer reads API key with terminal echo on | **Fixed** |
+| F5  | MEDIUM   | `OVERCLOCK_API_BASE` unvalidated — arbitrary/plain-HTTP endpoint | Open |
+| F6  | MEDIUM   | Agent state dir and transcripts created with default (world-readable) perms | Open |
+| F7  | MEDIUM   | `verify`/`delegate` sub-agent bash is unrestricted; "read-only" is prompt-only | Open |
+| F8  | MEDIUM   | No prompt-injection or untrusted-repo guardrails (documented risk) | Open |
+| F9  | MEDIUM   | Installer/update supply chain (`curl\|bash`, `npm install`, `reset --hard`) | Open |
+| F10 | LOW      | `.env` not in `.gitignore` — API key committable | **Fixed** |
+| F11 | LOW      | `postinstall.mjs` mutates `node_modules` after npm integrity checks | Open |
+| F12 | LOW      | Version check phones home to pi.dev on every session start | Open |
+| F13 | LOW      | No sub-agent turn/time/token cap — unbounded spend possible | Open |
+| F14 | LOW      | Hygiene: stale `bin/` gitignore rule; `ln -sf` clobbers existing files | Partial |
 
 ---
 
 ## HIGH
 
 ### F1 — `bin/overclock` sources `./.env` from the current directory as shell
+
+**Status: FIXED.** `./.env` is now parsed for `CEREBRAS_API_KEY` only — never
+executed, and it cannot supply `OVERCLOCK_API_BASE` or any other variable, nor
+override a key already configured via env or `~/.config`. The `~/.config` env
+files (user-controlled, same trust as `~/.zshrc`) are still sourced so
+`OVERCLOCK_*` knobs work there. Covered by an e2e regression test that plants a
+hostile `.env` and asserts no execution, no endpoint override, key still loads.
+Residual: repo-local `.env` can no longer provide `OVERCLOCK_*` knobs — by
+design; set them in `~/.config/overclock/env` or the shell instead.
 
 **Location:** `bin/overclock` lines 36–42.
 
@@ -124,6 +133,14 @@ exotic:
 
 ### F3 — Installed launcher doesn't resolve its symlink; PATH `pi` fallback
 
+**Status: FIXED.** The launcher now walks the symlink chain (`readlink` loop,
+relative targets resolved against the link's dir), so `HERE` lands on the real
+install root through `~/.local/bin/overclock` and the bundled
+`node_modules/.bin/pi` is found. The PATH `pi` fallback still exists for dev
+setups but now prints a loud warning naming the resolved binary. Covered by an
+e2e check that invokes `--version` through a symlink and asserts no PATH
+fallback.
+
 **Location:** `bin/overclock` line 5 (`BASH_SOURCE` resolution), lines 79–84
 (`command -v pi` fallback); `install.sh` line 60 (`ln -sf`).
 
@@ -152,6 +169,9 @@ Two consequences:
   with install instructions.
 
 ### F4 — API key entered in cleartext during install
+
+**Status: FIXED.** The prompt now uses `read -rs` (no echo) and prints a
+newline afterwards. The written env file was already `chmod 600`.
 
 **Location:** `install.sh` lines 86–91 — `read -r KEY < /dev/tty`.
 
@@ -263,10 +283,14 @@ document the boundary or offer a reduced-capability mode.
 
 ### F10 — `.env` not gitignored
 
+**Status: FIXED.** `.gitignore` now has `.env*` with an `!.env.example`
+exception, and the stale `bin/` rule (which silently ignored new files under
+`bin/` despite `bin/overclock` being tracked) is removed.
+
 **Location:** `.gitignore` (missing `.env`).
 
-The launcher (today) sources `./.env`; a user who creates one in the repo and runs
-`git add -A` commits `CEREBRAS_API_KEY`. **Fix:** add `.env*` with
+The launcher reads `./.env` for the API key; a user who creates one in the repo
+and runs `git add -A` commits `CEREBRAS_API_KEY`. **Fix:** add `.env*` with
 `!.env.example`. (Also note the stale `bin/` entry — `bin/overclock` is tracked,
 but new files under `bin/` are silently ignored by `git add .`; remove it.)
 
@@ -304,6 +328,9 @@ a limit (`OVERCLOCK_SUBAGENT_MAX_TURNS`, default ~25), plus a hard timeout.
 Consider a run-level token ceiling for the main loop too.
 
 ### F14 — Minor hygiene
+
+**Status: PARTIAL** — the stale `bin/` gitignore rule was removed under F10.
+Remaining open items:
 
 - `install.sh` line 60: `ln -sf` silently overwrites an existing
   `~/.local/bin/overclock` regular file. Check-and-warn first.
