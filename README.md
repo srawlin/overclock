@@ -19,7 +19,7 @@ Cerebras serves models like `qwen-3.8-27b` at ~2,000 output tokens/sec — fast 
 overclock is a thin extension on top of [`pi-coding-agent`](https://github.com/earendil-works/pi) that strips the harness down to what fast inference actually needs:
 
 - **Small fixed overhead** — ~4k tokens of system prompt + tool schemas, vs ~10k+ in heavier harnesses. Every request re-pays it; on Cerebras that difference is latency you can feel.
-- **Context budgeting instead of compaction spirals** — old tool outputs are elided in place (deduped by path/command, newest kept verbatim, generous keep window) so the transcript stays small *and* the model doesn't re-fetch what it already saw.
+- **Context budgeting** — old tool outputs are kept in place (deduped by path/command, newest kept verbatim, generous keep window) so the transcript stays small *and* the model doesn't re-fetch what it already saw.
 - **Prompt-cache friendly** — transforms only touch the tail of the transcript, keeping the prefix stable so Cerebras's prompt caching does its job (we measure ~90%+ cache hits in real sessions).
 - **Rate-limit aware** — soft TPM pacing keeps bursts under the 750k tokens/min developer limit instead of burning time on 429 retries.
 - **Sub-agents that protect context** — `explore` (read-only search), `delegate` (full coding task), and `verify` (independent PASS/FAIL check) run their own loops and return only summaries to the main agent.
@@ -33,7 +33,6 @@ curl -fsSL https://raw.githubusercontent.com/srawlin/overclock/dev/install.sh | 
 
 The installer clones to `~/.local/share/overclock`, links `overclock` into `~/.local/bin`, and prompts for your [Cerebras API key](https://cloud.cerebras.ai). Requires Node ≥ 22.19 and git.
 
-> **While the repo is private:** the raw.githubusercontent.com URL needs auth — clone with SSH instead and run `install.sh` locally, or let the installer's SSH fallback handle it.
 
 **Manual:**
 
