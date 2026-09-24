@@ -54,6 +54,27 @@ if [ "$NODE_MAJOR" -lt 22 ]; then
 	[ -n "$NEWEST" ] && export PATH="$NEWEST:$PATH"
 fi
 
+# Friendly guard: pi's arg parser treats `--session` (and friends) with no
+# value as an *unknown* option — misleading, the flag exists. Catch the
+# missing/flag-swallowed cases here with a clearer message. Args after `--`
+# are prompt text, not flags.
+seen_dd=0
+for ((i=1; i<=$#; i++)); do
+	arg="${!i}"
+	[ "$arg" = "--" ] && seen_dd=1
+	[ "$seen_dd" = 1 ] && continue
+	case "$arg" in
+		--session|--session-id|--session-dir|--fork)
+			j=$((i + 1))
+			next="${!j:-}"
+			if [ -z "$next" ] || [ "${next:0:1}" = "-" ]; then
+				echo "overclock: $arg requires a value — e.g. overclock --session <id> (or -r to pick a session)" >&2
+				exit 1
+			fi
+			;;
+	esac
+done
+
 # Prefer the pinned dependency; fall back to a pi on PATH.
 PI="$HERE/node_modules/.bin/pi"
 [ -x "$PI" ] || PI="$(command -v pi || true)"

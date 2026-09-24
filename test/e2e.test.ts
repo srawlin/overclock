@@ -62,6 +62,15 @@ function sse(): string {
 	check("pi package.json carries piConfig name", piPkg?.piConfig?.name === "overclock", JSON.stringify(piPkg?.piConfig))
 }
 
+// --- 1c. launcher arg guard: bare `--session` gets a clear error, not pi's "Unknown option" ---
+{
+	const r = spawnSync(BIN, ["--session"], { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] })
+	check("bare --session exits nonzero", r.status !== 0)
+	check("bare --session explains missing value", /requires a value/.test(r.stderr ?? ""), r.stderr?.slice(0, 160))
+	const r2 = spawnSync(BIN, ["--session", "--mode", "json"], { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] })
+	check("--session followed by flag also caught", r2.status !== 0 && /requires a value/.test(r2.stderr ?? ""))
+}
+
 // --- 2. full loop against mock SSE server ---
 const home = mkdtempSync(join(tmpdir(), "overclock-e2e-home-"))
 const agentDir = join(home, "agent")
