@@ -1,0 +1,56 @@
+import { hardBudgetTokens, keepRecentToolTokens, maxCompletionTokens, tightKeepTokens } from "../extensions/fastcode/knobs"
+
+let passed = 0
+let failed = 0
+function check(name: string, cond: boolean, extra = "") {
+	if (cond) {
+		passed++
+		console.log(`  ok  ${name}`)
+	} else {
+		failed++
+		console.log(`FAIL  ${name} ${extra}`)
+	}
+}
+
+const NAMES = ["FASTCODE_FAST", "FASTCODE_KEEP_TOKENS", "FASTCODE_HARD_BUDGET_TOKENS", "FASTCODE_TIGHT_KEEP_TOKENS", "FASTCODE_MAX_OUT_TOKENS"]
+function clearEnv() {
+	for (const n of NAMES) delete process.env[n]
+}
+clearEnv()
+
+// --- defaults (no env) ---
+check("default keep window 16k", keepRecentToolTokens() === 16_000)
+check("default hard budget 80k", hardBudgetTokens() === 80_000)
+check("default tight keep 4k", tightKeepTokens() === 4_000)
+check("default max out 16k", maxCompletionTokens() === 16_384)
+
+// --- FAST preset ---
+process.env.FASTCODE_FAST = "1"
+check("fast preset tightens keep", keepRecentToolTokens() === 8_000)
+check("fast preset tightens hard budget", hardBudgetTokens() === 20_000)
+check("fast preset tightens tight keep", tightKeepTokens() === 2_000)
+check("fast preset caps output 8k", maxCompletionTokens() === 8_192)
+
+// --- individual override beats preset ---
+process.env.FASTCODE_KEEP_TOKENS = "12345"
+check("explicit override beats preset", keepRecentToolTokens() === 12_345)
+delete process.env.FASTCODE_KEEP_TOKENS
+
+// --- preset only on exact "1" ---
+process.env.FASTCODE_FAST = "0"
+check("FAST=0 is off", keepRecentToolTokens() === 16_000)
+process.env.FASTCODE_FAST = "yes"
+check("FAST=yes is off", keepRecentToolTokens() === 16_000)
+
+// --- garbage values fall back ---
+process.env.FASTCODE_FAST = "1"
+process.env.FASTCODE_HARD_BUDGET_TOKENS = "nope"
+check("invalid int falls back to preset", hardBudgetTokens() === 20_000)
+process.env.FASTCODE_HARD_BUDGET_TOKENS = "-5"
+check("negative falls back", hardBudgetTokens() === 20_000)
+process.env.FASTCODE_HARD_BUDGET_TOKENS = ""
+check("empty falls back", hardBudgetTokens() === 20_000)
+
+clearEnv()
+console.log(`\n${passed} passed, ${failed} failed`)
+process.exit(failed ? 1 : 0)

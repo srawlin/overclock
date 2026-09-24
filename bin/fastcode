@@ -5,7 +5,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Separate agent state (sessions, auth, settings) from a stock pi install.
-export PI_CODING_AGENT_DIR="${FASTCODE_AGENT_DIR:-$HOME/.fastcode/agent}"
+export PI_CODING_AGENT_DIR="${PI_CODING_AGENT_DIR:-${FASTCODE_AGENT_DIR:-$HOME/.fastcode/agent}}"
 mkdir -p "$PI_CODING_AGENT_DIR"
 
 # First-run defaults; user-editable afterwards.

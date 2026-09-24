@@ -14,6 +14,7 @@ import {
 	turnStart,
 } from "./metrics"
 import { registerSubAgentTools } from "./subagents"
+import { logoComponent } from "./logo"
 
 let sessionCaptured = false
 function captureSession(ctx: ExtensionContext | undefined) {
@@ -56,8 +57,10 @@ const HAS_OUTPUT = (types: string[]) => types.some((t) => t === "text" || t === 
 
 export default function fastcode(pi: ExtensionAPI) {
 	// Cerebras catalog: qwen-3.8-27b is too new for pi's built-in list.
+	// FASTCODE_API_BASE overrides the endpoint — used by the e2e test's local
+	// mock server and handy for proxies/gateways.
 	pi.registerProvider("cerebras", {
-		baseUrl: "https://api.cerebras.ai/v1",
+		baseUrl: process.env.FASTCODE_API_BASE ?? "https://api.cerebras.ai/v1",
 		apiKey: "CEREBRAS_API_KEY",
 		api: "openai-completions",
 		models: CEREBRAS_MODELS,
@@ -67,6 +70,12 @@ export default function fastcode(pi: ExtensionAPI) {
 	installContextBudget(pi)
 	installProviderTuning(pi)
 	registerSubAgentTools(pi)
+
+	// Startup banner — replaces pi's built-in header in interactive mode.
+	// session_start fires after ui.start(), so the header slot exists.
+	pi.on("session_start", (_event, ctx) => {
+		if (ctx.hasUI) ctx.ui.setHeader(() => logoComponent())
+	})
 
 	// pi's built-in exit is /quit (or Ctrl-D); /exit is not a command and would
 	// otherwise be submitted to the model as a literal prompt — the agent runs a

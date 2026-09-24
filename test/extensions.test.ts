@@ -1,5 +1,10 @@
 import { FASTCODE_GUIDANCE } from "../extensions/fastcode/prompt"
 import { registerSubAgentTools, resolveSubAgentModel } from "../extensions/fastcode/subagents"
+import { logoLines } from "../extensions/fastcode/logo"
+import fastcode from "../extensions/fastcode"
+import { mkdtempSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 let passed = 0
 let failed = 0
@@ -54,6 +59,40 @@ check("provider/id form works", resolveSubAgentModel(ctx, "explore") === ossMode
 process.env.FASTCODE_EXPLORE_MODEL = "nonexistent-model"
 check("unknown model falls back to ctx.model", resolveSubAgentModel(ctx, "explore") === mainModel)
 delete process.env.FASTCODE_EXPLORE_MODEL
+
+// --- /exit command (regression: pi only ships /quit — /exit used to go to the model) ---
+process.env.PI_CODING_AGENT_DIR = mkdtempSync(join(tmpdir(), "fastcode-ext-test-"))
+const commands: any[] = []
+const fakePiFull = {
+	registerTool: () => {},
+	registerCommand: (name: string, opts: any) => commands.push({ name, ...opts }),
+	registerProvider: () => {},
+	registerFlag: () => {},
+	on: () => {},
+	getFlag: () => undefined,
+} as any
+fastcode(fakePiFull)
+const exitCmd = commands.find((c) => c.name === "exit")
+check("/exit command registered", exitCmd !== undefined)
+{
+	let shutdownCalled = false
+	let abortCalled = false
+	const cmdCtx = { shutdown: () => (shutdownCalled = true), abort: () => (abortCalled = true), isIdle: () => false } as any
+	await exitCmd.handler("", cmdCtx)
+	check("/exit calls shutdown", shutdownCalled)
+	check("/exit aborts in-flight turn when busy", abortCalled)
+	shutdownCalled = false
+	abortCalled = false
+	await exitCmd.handler("", { ...cmdCtx, isIdle: () => true })
+	check("/exit skips abort when idle", shutdownCalled && !abortCalled)
+}
+
+// --- logo banner ---
+const lines = logoLines()
+const joined = lines.join("\n")
+check("logo renders 5 art rows + tagline + padding", lines.length === 8)
+check("logo has italic ANSI on fast", joined.includes("\x1b[3m") && joined.includes("\x1b[23m"))
+check("logo contains both words' glyphs", joined.includes("/ __/___") && joined.includes("\\__,_|"))
 
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed ? 1 : 0)
