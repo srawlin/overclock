@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// fastcode eval harness — runs a fixed set of tasks through the real fastcode
+// overclock eval harness — runs a fixed set of tasks through the real overclock
 // CLI end-to-end, measuring wall clock, LLM latency (TTFT / tok-s / turns) and
 // tool behavior, and verifying correctness. This is the "did we get faster AND
 // stay smart" scoreboard.
@@ -8,13 +8,14 @@
 //   node test/eval/run.mjs                     # run all tasks
 //   node test/eval/run.mjs --only fix-bug      # single task (prefix match)
 //   node test/eval/run.mjs --repeat 3          # repeat each task N times
-//   FASTCODE_MODEL=cerebras/gpt-oss-120b node test/eval/run.mjs   # compare models
+//   OVERCLOCK_MODEL=cerebras/gpt-oss-120b node test/eval/run.mjs   # compare models
 //
 // Env:
-//   FASTCODE_MODEL   — model id (default: the harness default, cerebras/qwen-3.8-27b)
-//   FASTCODE_FAST=1  — enables FASTCODE_FAST experiment knobs in the extension
+//   OVERCLOCK_MODEL   — model id (default: the harness default, cerebras/qwen-3.8-27b)
+//   OVERCLOCK_FAST=1  — enables OVERCLOCK_FAST experiment knobs in the extension
+//   (legacy FASTCODE_* names still work — the launcher/knobs read both)
 //
-// Each task spawns:  bin/fastcode --mode json --print "<task hint>"
+// Each task spawns:  bin/overclock --mode json --print "<task hint>"
 // in a fresh throwaway copy of the fixture. We parse the JSON event stream for
 // per-turn timing, read the metrics JSONL for the run rollup, then run the
 // task's `verify` command (usually the fixture's test suite) for correctness.
@@ -36,8 +37,9 @@ import { fileURLToPath } from "node:url"
 const here = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(here, "../..")
 const FIXTURE = (name = "calc") => join(here, "fixtures", name)
-const BIN = join(repoRoot, "bin", "fastcode")
-const MODEL = process.env.FASTCODE_MODEL || "cerebras/qwen-3.8-27b"
+const BIN = join(repoRoot, "bin", "overclock")
+const MODEL = process.env.OVERCLOCK_MODEL || process.env.FASTCODE_MODEL || "cerebras/qwen-3.8-27b"
+const FAST_ON = process.env.OVERCLOCK_FAST === "1" || process.env.FASTCODE_FAST === "1"
 const TIMEOUT_MS = 240_000
 
 // ---------------------------------------------------------------------------
@@ -156,8 +158,7 @@ async function runOnce(task, idx, agentDir) {
 	const env = {
 		...process.env,
 		PI_CODING_AGENT_DIR: agentDir,
-		FASTCODE_MODEL: MODEL,
-		...(process.env.FASTCODE_FAST === "1" ? { FASTCODE_FAST: "1" } : {}),
+		OVERCLOCK_MODEL: MODEL,
 	}
 
 	let timedOut = false
@@ -240,8 +241,8 @@ async function main() {
 		console.error(`no tasks match --only ${[...only].join(",")}  (available: ${TASKS.map((t) => t.name).join(", ")})`)
 		process.exit(2)
 	}
-	const agentDir = mkdtempSync(join(tmpdir(), "fastcode-eval-agent-"))
-	console.log(`# fastcode eval  model=${MODEL}  fast=${process.env.FASTCODE_FAST === "1" ? "ON" : "off"}  ${tasks.length} task(s) x ${repeat}${KEEP ? "  [--keep]" : ""}`)
+	const agentDir = mkdtempSync(join(tmpdir(), "overclock-eval-agent-"))
+	console.log(`# overclock eval  model=${MODEL}  fast=${FAST_ON ? "ON" : "off"}  ${tasks.length} task(s) x ${repeat}${KEEP ? "  [--keep]" : ""}`)
 
 	const results = []
 	for (const task of tasks) {
@@ -276,7 +277,7 @@ async function main() {
 	}
 	const summary = {
 		model: MODEL,
-		fast: process.env.FASTCODE_FAST === "1",
+		fast: FAST_ON,
 		passed: pass,
 		total: results.length,
 		passRate: results.length ? +((pass / results.length) * 100).toFixed(1) : 0,
@@ -295,6 +296,6 @@ async function main() {
 }
 
 main().catch((e) => {
-	console.error("fastcode-eval crashed:", e)
+	console.error("overclock-eval crashed:", e)
 	process.exit(1)
 })

@@ -13,7 +13,7 @@ import { Type } from "typebox"
 import { pruneContext } from "./context-budget"
 import { logMetrics } from "./metrics"
 import { paceRequest } from "./provider-tuning"
-import { subAgentReasoningEffort } from "./knobs"
+import { envVar, subAgentReasoningEffort } from "./knobs"
 
 // Cerebras enforces RPM and TPM per org. Sub-agents multiply request rate, so
 // cap concurrency — three in-flight sub-agents is plenty at ~1500 tok/s.
@@ -97,7 +97,7 @@ const DEFAULT_EXPLORE_MODEL = "gpt-oss-120b"
 /** Model routing per sub-agent role. Explore defaults to a cheaper, faster
  *  search-oriented model; env vars below let callers tune or disable it.
  *
- *  FASTCODE_EXPLORE_MODEL:
+ *  OVERCLOCK_EXPLORE_MODEL (legacy: FASTCODE_EXPLORE_MODEL):
  *    (unset)  → DEFAULT_EXPLORE_MODEL (gpt-oss-120b by default)
  *    ""       → fall back to ctx.model (the main model; explicit escape hatch)
  *    "id" or "provider/id" → resolve via the model registry
@@ -106,7 +106,7 @@ const DEFAULT_EXPLORE_MODEL = "gpt-oss-120b"
  *  ctx.model so a typo can't brick the tool. */
 export function resolveSubAgentModel(ctx: ExtensionContext, name: SubAgentName) {
 	if (name !== "explore") return ctx.model
-	const raw = process.env.FASTCODE_EXPLORE_MODEL
+	const raw = envVar("EXPLORE_MODEL")
 	const ref = raw === undefined ? DEFAULT_EXPLORE_MODEL : raw
 	if (ref === "") return ctx.model // explicit escape: use main model
 	const [provider, id] = ref.includes("/") ? ref.split("/", 2) : ["cerebras", ref]

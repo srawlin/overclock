@@ -1,9 +1,9 @@
 import { createRequire } from "node:module"
 
-// pi's own update banner is suppressed in bin/fastcode (PI_SKIP_VERSION_CHECK=1):
-// it names "pi" and suggests `pi update`, which fastcode users don't have on
-// PATH — the notice reads like a fastcode update and the fix command fails.
-// This check reports the same signal with fastcode branding and the correct
+// pi's own update banner is suppressed in bin/overclock (PI_SKIP_VERSION_CHECK=1):
+// it names "pi" and suggests `pi update`, which overclock users don't have on
+// PATH — the notice reads like an overclock update and the fix command fails.
+// This check reports the same signal with overclock branding and the correct
 // upgrade path (bump the npm dep in this repo).
 const LATEST_VERSION_URL = "https://pi.dev/api/latest-version"
 const PI_PACKAGE = "@earendil-works/pi-coding-agent"
@@ -46,7 +46,7 @@ export function checkPiUpdate(notify: (message: string, type?: "info" | "warning
 			if (typeof data.version === "string" && newerVersion(data.version, current)) {
 				notify(
 					`pi runtime update available: ${current} → ${data.version} ` +
-						`(fastcode is built on pi). Upgrade: npm install ${PI_PACKAGE}@latest in the fastcode repo.`,
+						`(overclock is built on pi). Upgrade: npm install ${PI_PACKAGE}@latest in the overclock repo.`,
 					"info",
 				)
 			}

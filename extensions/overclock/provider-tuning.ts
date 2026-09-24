@@ -7,7 +7,7 @@ import { maxCompletionTokens, reasoningEffortOverride, temperatureOverride } fro
 // every turn reserves far more output quota than an agentic step needs.
 // Typical tool-call turns finish under ~4k output; 16k keeps long writes safe
 // while roughly halving the reservation.
-// `FASTCODE_FAST=1` tightens it via knobs.maxCompletionTokens. Cerebras rate
+// `OVERCLOCK_FAST=1` tightens it via knobs.maxCompletionTokens. Cerebras rate
 // limits on input + this reservation, and it also feeds the pacing budget, so a
 // smaller cap saves both wire tokens and pre-request sleep.
 

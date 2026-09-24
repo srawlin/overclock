@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { installContextBudget } from "./context-budget"
 import { installProviderTuning } from "./provider-tuning"
 import { CEREBRAS_MODELS } from "./model"
-import { FASTCODE_GUIDANCE } from "./prompt"
+import { OVERCLOCK_GUIDANCE } from "./prompt"
 import {
 	initMetrics,
 	logMetrics,
@@ -16,6 +16,7 @@ import {
 import { registerSubAgentTools } from "./subagents"
 import { logoComponent } from "./logo"
 import { checkPiUpdate } from "./version-check"
+import { envVar } from "./knobs"
 
 let sessionCaptured = false
 function captureSession(ctx: ExtensionContext | undefined) {
@@ -25,7 +26,7 @@ function captureSession(ctx: ExtensionContext | undefined) {
 }
 
 // ---- latency telemetry ----------------------------------------------------
-// The "is fastcode fast?" signal. The main loop runs one assistant turn at a
+// The "is overclock fast?" signal. The main loop runs one assistant turn at a
 // time, so a single activeKey suffices; sub-agent inner requests bypass
 // extension hooks entirely (they self-report via the `subagent` metric), so
 // these `turn`/`tool` records are main-loop only — no double counting.
@@ -56,12 +57,12 @@ function contentPartTypes(message: unknown): string[] {
 // empty skeleton that arrives in message_start.
 const HAS_OUTPUT = (types: string[]) => types.some((t) => t === "text" || t === "thinking" || t === "toolCall")
 
-export default function fastcode(pi: ExtensionAPI) {
+export default function overclock(pi: ExtensionAPI) {
 	// Cerebras catalog: qwen-3.8-27b is too new for pi's built-in list.
-	// FASTCODE_API_BASE overrides the endpoint — used by the e2e test's local
+	// OVERCLOCK_API_BASE overrides the endpoint — used by the e2e test's local
 	// mock server and handy for proxies/gateways.
 	pi.registerProvider("cerebras", {
-		baseUrl: process.env.FASTCODE_API_BASE ?? "https://api.cerebras.ai/v1",
+		baseUrl: envVar("API_BASE") ?? "https://api.cerebras.ai/v1",
 		// pi >= 0.74 treats apiKey as a literal/interpolation: "$VAR" reads the
 		// env var; a bare name would be sent as the literal key (→ 401).
 		apiKey: "$CEREBRAS_API_KEY",
@@ -88,24 +89,24 @@ export default function fastcode(pi: ExtensionAPI) {
 	// shutdown() sets shutdownRequested and exits immediately when idle; abort()
 	// ends an in-flight turn so agent_end triggers the deferred shutdown.
 	pi.registerCommand("exit", {
-		description: "Exit fastcode",
+		description: "Exit overclock",
 		handler: async (_args, ctx) => {
 			ctx.shutdown()
 			if (!ctx.isIdle()) ctx.abort()
 		},
 	})
 
-	// FASTCODE_DEBUG=1 logs the outgoing request size each turn.
+	// OVERCLOCK_DEBUG=1 logs the outgoing request size each turn.
 	pi.on("before_provider_request", (event, ctx) => {
 		captureSession(ctx)
-		if (!process.env.FASTCODE_DEBUG) return
+		if (!envVar("DEBUG")) return
 		const p = event.payload as Record<string, unknown> & { messages?: { role?: string; reasoning?: string }[] }
 		const reasoningChars = (p.messages ?? []).reduce(
 			(sum, m) => sum + (typeof m.reasoning === "string" ? m.reasoning.length : 0),
 			0,
 		)
 		console.error(
-			`[fastcode] request: ${p.messages?.length ?? "?"} messages, ~${Math.round(
+			`[overclock] request: ${p.messages?.length ?? "?"} messages, ~${Math.round(
 				JSON.stringify(p).length / 4,
 			)} tokens | max_completion_tokens=${p.max_completion_tokens ?? p.max_tokens ?? "unset"} reasoning_effort=${
 				p.reasoning_effort ?? "unset"
@@ -234,6 +235,6 @@ export default function fastcode(pi: ExtensionAPI) {
 	})
 
 	pi.on("before_agent_start", (event) => ({
-		systemPrompt: `${event.systemPrompt}\n\n${FASTCODE_GUIDANCE}`,
+		systemPrompt: `${event.systemPrompt}\n\n${OVERCLOCK_GUIDANCE}`,
 	}))
 }

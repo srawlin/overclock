@@ -1,4 +1,4 @@
-export const FASTCODE_GUIDANCE = `## Context budget
+export const OVERCLOCK_GUIDANCE = `## Context budget
 
 This model has a small context window, and every request re-sends the transcript.
 

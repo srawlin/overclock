@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
-// Append-only JSONL metrics for fastcode. One line per event — request
+// Append-only JSONL metrics for overclock. One line per event — request
 // estimates (from the context transform), provider responses (status +
 // rate-limit headers), assistant usage, per-turn/tool latency, and sub-agent
 // summaries. Numbers only: no message content is ever written here.

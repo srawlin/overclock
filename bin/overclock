@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
-# fastcode — pi-coding-agent harness tuned for Cerebras (small-context model, fast inference)
+# overclock — pi-coding-agent harness tuned for Cerebras (small-context model, fast inference)
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# One-time rename migration: adopt the old fastcode state dir if it exists.
+if [ ! -d "$HOME/.overclock" ] && [ -d "$HOME/.fastcode" ]; then
+	mv "$HOME/.fastcode" "$HOME/.overclock"
+fi
+
 # Separate agent state (sessions, auth, settings) from a stock pi install.
-export PI_CODING_AGENT_DIR="${PI_CODING_AGENT_DIR:-${FASTCODE_AGENT_DIR:-$HOME/.fastcode/agent}}"
+export PI_CODING_AGENT_DIR="${PI_CODING_AGENT_DIR:-${OVERCLOCK_AGENT_DIR:-${FASTCODE_AGENT_DIR:-$HOME/.overclock/agent}}}"
 mkdir -p "$PI_CODING_AGENT_DIR"
 
 # First-run defaults; user-editable afterwards.
@@ -20,17 +25,18 @@ if [ ! -f "$PI_CODING_AGENT_DIR/settings.json" ]; then
 JSON
 fi
 
-# API key: existing env wins, else source ~/.config/fastcode/env, else .env in cwd.
+# API key: existing env wins, else source ~/.config/overclock/env (legacy:
+# ~/.config/fastcode/env), else .env in cwd.
 if [ -z "${CEREBRAS_API_KEY:-}" ]; then
-	if [ -f "$HOME/.config/fastcode/env" ]; then
-		set -a; . "$HOME/.config/fastcode/env"; set +a
-	elif [ -f "./.env" ]; then
-		set -a; . "./.env"; set +a
-	fi
+	for f in "$HOME/.config/fastcode/env" "$HOME/.config/overclock/env" "./.env"; do
+		if [ -f "$f" ]; then
+			set -a; . "$f"; set +a
+		fi
+	done
 fi
 
 # pi's own update banner names "pi" and suggests `pi update` — confusing under
-# fastcode branding (and pi isn't on PATH). The extension reports pi updates
+# overclock branding (and pi isn't on PATH). The extension reports pi updates
 # itself, with the right package name and upgrade path.
 export PI_SKIP_VERSION_CHECK=1
 
@@ -46,12 +52,12 @@ fi
 PI="$HERE/node_modules/.bin/pi"
 [ -x "$PI" ] || PI="$(command -v pi || true)"
 if [ -z "$PI" ]; then
-	echo "fastcode: pi not found — run 'npm install' in $HERE or install @earendil-works/pi-coding-agent" >&2
+	echo "overclock: pi not found — run 'npm install' in $HERE or install @earendil-works/pi-coding-agent" >&2
 	exit 1
 fi
 
 exec "$PI" \
-	--extension "$HERE/extensions/fastcode" \
-	--model "${FASTCODE_MODEL:-cerebras/qwen-3.8-27b}" \
+	--extension "$HERE/extensions/overclock" \
+	--model "${OVERCLOCK_MODEL:-${FASTCODE_MODEL:-cerebras/qwen-3.8-27b}}" \
 	--tools read,write,edit,bash,grep,find,ls,explore,delegate,verify \
 	"$@"

@@ -1,4 +1,4 @@
-import { installContextBudget, pruneContext } from "../extensions/fastcode/context-budget"
+import { installContextBudget, pruneContext } from "../extensions/overclock/context-budget"
 
 type Handler = (event: any, ctx: any) => any
 const handlers: Record<string, Handler> = {}

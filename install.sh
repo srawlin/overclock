@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
-# fastcode installer
+# overclock installer
 #   curl -fsSL https://raw.githubusercontent.com/srawlin/fastcode/dev/install.sh | bash
 #
 # What it does:
-#   1. clones (or updates) the repo into ~/.local/share/fastcode
+#   1. clones (or updates) the repo into ~/.local/share/overclock
 #   2. npm-installs its runtime deps (pi-coding-agent etc.)
-#   3. symlinks bin/fastcode into ~/.local/bin
-#   4. helps you set CEREBRAS_API_KEY (writes ~/.config/fastcode/env)
+#   3. symlinks bin/overclock into ~/.local/bin
+#   4. helps you set CEREBRAS_API_KEY (writes ~/.config/overclock/env)
 #
-# Overrides: FASTCODE_HOME, FASTCODE_BIN_DIR, FASTCODE_BRANCH
+# Overrides: OVERCLOCK_HOME, OVERCLOCK_BIN_DIR, OVERCLOCK_BRANCH
 set -euo pipefail
 
 REPO_HTTPS="https://github.com/srawlin/fastcode.git"
 REPO_SSH="git@github.com:srawlin/fastcode.git"
-BRANCH="${FASTCODE_BRANCH:-dev}"
-DEST="${FASTCODE_HOME:-$HOME/.local/share/fastcode}"
-BIN_DIR="${FASTCODE_BIN_DIR:-$HOME/.local/bin}"
+BRANCH="${OVERCLOCK_BRANCH:-${FASTCODE_BRANCH:-dev}}"
+DEST="${OVERCLOCK_HOME:-$HOME/.local/share/overclock}"
+BIN_DIR="${OVERCLOCK_BIN_DIR:-$HOME/.local/bin}"
 
 say()  { printf '  %s\n' "$*"; }
-fail() { printf 'fastcode install: %s\n' "$*" >&2; exit 1; }
+fail() { printf 'overclock install: %s\n' "$*" >&2; exit 1; }
 
 command -v git >/dev/null 2>&1 || fail "git is required"
 
@@ -57,18 +57,31 @@ say "installing dependencies"
 
 # --- link -------------------------------------------------------------------
 mkdir -p "$BIN_DIR"
-ln -sf "$DEST/bin/fastcode" "$BIN_DIR/fastcode"
-chmod +x "$DEST/bin/fastcode"
+ln -sf "$DEST/bin/overclock" "$BIN_DIR/overclock"
+chmod +x "$DEST/bin/overclock"
+
+# Remove a stale fastcode symlink left by the pre-rename installer.
+if [ -L "$BIN_DIR/fastcode" ]; then
+	case "$(readlink "$BIN_DIR/fastcode")" in
+		*/fastcode/bin/fastcode|*/overclock/bin/*) rm -f "$BIN_DIR/fastcode" ;;
+	esac
+fi
 
 case ":$PATH:" in
 	*":$BIN_DIR:"*) ;;
-	*) say "note: $BIN_DIR is not on your PATH — add it or run $BIN_DIR/fastcode" ;;
+	*) say "note: $BIN_DIR is not on your PATH — add it or run $BIN_DIR/overclock" ;;
 esac
 
 # --- API key -----------------------------------------------------------------
-ENV_FILE="$HOME/.config/fastcode/env"
+ENV_FILE="$HOME/.config/overclock/env"
+LEGACY_ENV_FILE="$HOME/.config/fastcode/env"
 if [ -n "${CEREBRAS_API_KEY:-}" ] || grep -qs "CEREBRAS_API_KEY" "$ENV_FILE" 2>/dev/null; then
 	: # already configured
+elif grep -qs "CEREBRAS_API_KEY" "$LEGACY_ENV_FILE" 2>/dev/null; then
+	# carry the key forward to the renamed location
+	mkdir -p "$(dirname "$ENV_FILE")"
+	cp "$LEGACY_ENV_FILE" "$ENV_FILE"
+	say "migrated config from $LEGACY_ENV_FILE -> $ENV_FILE"
 elif [ -r /dev/tty ]; then
 	printf '  CEREBRAS_API_KEY (from https://cloud.cerebras.ai): ' > /dev/tty
 	read -r KEY < /dev/tty || true
@@ -84,4 +97,4 @@ else
 	say "add your key:  echo 'CEREBRAS_API_KEY=...' > $ENV_FILE"
 fi
 
-printf '\n  done — run: fastcode\n\n'
+printf '\n  done — run: overclock\n\n'

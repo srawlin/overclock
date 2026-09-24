@@ -1,8 +1,8 @@
-import { FASTCODE_GUIDANCE } from "../extensions/fastcode/prompt"
-import { registerSubAgentTools, resolveSubAgentModel } from "../extensions/fastcode/subagents"
-import { logoLines } from "../extensions/fastcode/logo"
-import { newerVersion } from "../extensions/fastcode/version-check"
-import fastcode from "../extensions/fastcode"
+import { OVERCLOCK_GUIDANCE } from "../extensions/overclock/prompt"
+import { registerSubAgentTools, resolveSubAgentModel } from "../extensions/overclock/subagents"
+import { logoLines } from "../extensions/overclock/logo"
+import { newerVersion } from "../extensions/overclock/version-check"
+import overclock from "../extensions/overclock"
 import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -20,10 +20,10 @@ function check(name: string, cond: boolean, extra = "") {
 }
 
 // --- item 1+2: guidance steers toward dedicated tools and durable notes ---
-check("guidance prefers dedicated tools over bash", FASTCODE_GUIDANCE.includes("Prefer the read, grep, find, and ls tools over bash"))
-check("guidance prescribes durable notes file", FASTCODE_GUIDANCE.includes("NOTES.md"))
-check("guidance explains stubs mean already-seen", FASTCODE_GUIDANCE.includes("already received that output"))
-check("guidance mentions verify tool", FASTCODE_GUIDANCE.includes("verify"))
+check("guidance prefers dedicated tools over bash", OVERCLOCK_GUIDANCE.includes("Prefer the read, grep, find, and ls tools over bash"))
+check("guidance prescribes durable notes file", OVERCLOCK_GUIDANCE.includes("NOTES.md"))
+check("guidance explains stubs mean already-seen", OVERCLOCK_GUIDANCE.includes("already received that output"))
+check("guidance mentions verify tool", OVERCLOCK_GUIDANCE.includes("verify"))
 
 // --- item 3+4: tool registration ---
 const tools: any[] = []
@@ -53,24 +53,33 @@ const ctx = {
 } as any
 
 // Default: explore → cheaper search model; delegate/verify → main model.
+delete process.env.OVERCLOCK_EXPLORE_MODEL
 delete process.env.FASTCODE_EXPLORE_MODEL
 check("default: explore → gpt-oss-120b", resolveSubAgentModel(ctx, "explore") === ossModel)
 check("invariant: delegate never re-routed", resolveSubAgentModel(ctx, "delegate") === mainModel)
 check("invariant: verify never re-routed", resolveSubAgentModel(ctx, "verify") === mainModel)
 
 // Env escape hatches.
-process.env.FASTCODE_EXPLORE_MODEL = ""
+process.env.OVERCLOCK_EXPLORE_MODEL = ""
 check("empty env → fall back to main model (escape hatch)", resolveSubAgentModel(ctx, "explore") === mainModel)
-process.env.FASTCODE_EXPLORE_MODEL = "gpt-oss-120b"
+process.env.OVERCLOCK_EXPLORE_MODEL = "gpt-oss-120b"
 check("flag id form → gpt-oss-120b", resolveSubAgentModel(ctx, "explore") === ossModel)
-process.env.FASTCODE_EXPLORE_MODEL = "cerebras/gpt-oss-120b"
+process.env.OVERCLOCK_EXPLORE_MODEL = "cerebras/gpt-oss-120b"
 check("flag provider/id form works", resolveSubAgentModel(ctx, "explore") === ossModel)
-process.env.FASTCODE_EXPLORE_MODEL = "nonexistent-model"
+process.env.OVERCLOCK_EXPLORE_MODEL = "nonexistent-model"
 check("unknown flag id falls back to ctx.model", resolveSubAgentModel(ctx, "explore") === mainModel)
+
+// Legacy FASTCODE_* name still honored (rename migration), but OVERCLOCK_* wins.
+delete process.env.OVERCLOCK_EXPLORE_MODEL
+process.env.FASTCODE_EXPLORE_MODEL = "gpt-oss-120b"
+check("legacy FASTCODE_EXPLORE_MODEL honored", resolveSubAgentModel(ctx, "explore") === ossModel)
+process.env.OVERCLOCK_EXPLORE_MODEL = ""
+check("OVERCLOCK_* overrides legacy FASTCODE_*", resolveSubAgentModel(ctx, "explore") === mainModel)
+delete process.env.OVERCLOCK_EXPLORE_MODEL
 delete process.env.FASTCODE_EXPLORE_MODEL
 
 // --- /exit command (regression: pi only ships /quit — /exit used to go to the model) ---
-process.env.PI_CODING_AGENT_DIR = mkdtempSync(join(tmpdir(), "fastcode-ext-test-"))
+process.env.PI_CODING_AGENT_DIR = mkdtempSync(join(tmpdir(), "overclock-ext-test-"))
 const commands: any[] = []
 const fakePiFull = {
 	registerTool: () => {},
@@ -80,7 +89,7 @@ const fakePiFull = {
 	on: () => {},
 	getFlag: () => undefined,
 } as any
-fastcode(fakePiFull)
+overclock(fakePiFull)
 const exitCmd = commands.find((c) => c.name === "exit")
 check("/exit command registered", exitCmd !== undefined)
 {
@@ -100,8 +109,8 @@ check("/exit command registered", exitCmd !== undefined)
 const lines = logoLines()
 const joined = lines.join("\n")
 check("logo renders 5 art rows + tagline + padding", lines.length === 8)
-check("logo has italic ANSI on fast", joined.includes("\x1b[3m") && joined.includes("\x1b[23m"))
-check("logo contains both words' glyphs", joined.includes("/ __/___") && joined.includes("\\__,_|"))
+check("logo has italic ANSI on over", joined.includes("\x1b[3m") && joined.includes("\x1b[23m"))
+check("logo contains both words' glyphs", joined.includes("_____  _____") && joined.includes("\\___|_|"))
 
 // --- version check ---
 check("newer minor detected", newerVersion("0.88.0", "0.87.1"))

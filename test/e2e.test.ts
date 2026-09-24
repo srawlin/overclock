@@ -1,6 +1,6 @@
-// End-to-end smoke: runs the real bin/fastcode against a local mock that
+// End-to-end smoke: runs the real bin/overclock against a local mock that
 // speaks OpenAI-style SSE. Exercises the whole path — launcher bootstrap,
-// pi startup, extension load, provider registration (FASTCODE_API_BASE),
+// pi startup, extension load, provider registration (OVERCLOCK_API_BASE),
 // context + payload hooks, SSE parsing, and the metrics log — with no
 // Cerebras key and no network.
 //
@@ -14,7 +14,7 @@ import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)))
-const BIN = join(repoRoot, "bin", "fastcode")
+const BIN = join(repoRoot, "bin", "overclock")
 
 let passed = 0
 let failed = 0
@@ -50,7 +50,7 @@ function sse(): string {
 }
 
 // --- 2. full loop against mock SSE server ---
-const home = mkdtempSync(join(tmpdir(), "fastcode-e2e-home-"))
+const home = mkdtempSync(join(tmpdir(), "overclock-e2e-home-"))
 const agentDir = join(home, "agent")
 let posts = 0
 let sawAuth = false
@@ -90,7 +90,7 @@ try {
 		HOME: home,
 		PI_CODING_AGENT_DIR: agentDir,
 		CEREBRAS_API_KEY: "test-key",
-		FASTCODE_API_BASE: `http://127.0.0.1:${port}/v1`,
+		OVERCLOCK_API_BASE: `http://127.0.0.1:${port}/v1`,
 		TERM: "dumb",
 	}
 	// NOTE: async spawn required — spawnSync would block this process's event

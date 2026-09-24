@@ -1,4 +1,4 @@
-import { toolEnd, toolStart, turnEnd, turnFirstToken, turnOutput, turnStart, turnToolCall } from "../extensions/fastcode/metrics"
+import { toolEnd, toolStart, turnEnd, turnFirstToken, turnOutput, turnStart, turnToolCall } from "../extensions/overclock/metrics"
 
 let passed = 0
 let failed = 0

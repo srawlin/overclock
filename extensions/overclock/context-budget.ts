@@ -23,7 +23,7 @@ import { hardBudgetTokens, keepRecentToolTokens, tightKeepTokens } from "./knobs
 /** Tool output kept verbatim, counted back from the newest results. */
 // Size thresholds below are the non-fast baseline. The keep-window constants
 // (KEEP_RECENT / HARD_BUDGET / TIGHT_KEEP) became knobs — see knobs.ts; the
-// `FASTCODE_FAST=1` preset tightens them to slash wire size and TTFT.
+// `OVERCLOCK_FAST=1` preset tightens them to slash wire size and TTFT.
 /** Don't stub outputs smaller than this — not worth the churn. */
 const MIN_PRUNE_CHARS = 800
 /** A single in-flight result larger than this gets middle-truncated so one
