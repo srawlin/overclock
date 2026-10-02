@@ -8,7 +8,8 @@
 
 import { spawn, spawnSync } from "node:child_process"
 import { createServer, type Server } from "node:http"
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs"
+import { ProjectTrustStore } from "@earendil-works/pi-coding-agent"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -218,6 +219,84 @@ try {
 		check("hostile .env: no code executed", !existsSync(pwnFile))
 		check("hostile .env: request still reached the mock (API_BASE not overridden)", posts > postsBefore, `posts=${posts} stderr=${r2.stderr?.slice(-300)}`)
 		check("hostile .env: key parsed and sent", lastAuth === "Bearer dotenv-key", `auth=${lastAuth}`)
+	}
+
+	// --- 5. F15: --safe must not execute configured MCP servers ---
+	// Global mcp.json (agent dir) + a *remembered-trusted* project's
+	// .overclock/mcp.json each spawn a marker command at session start. Default
+	// mode must run both (control — proves the setup is live); --safe must run
+	// neither, while still reaching the mock with the five read-only tools.
+	{
+		// realpath: pi canonicalizes cwd (/var → /private/var on macOS) before
+		// trust lookup, so store trust under the canonical path pi will see.
+		const projDir = realpathSync(mkdtempSync(join(tmpdir(), "overclock-e2e-proj-")))
+		mkdirSync(join(projDir, ".overclock"), { recursive: true })
+		const projMarker = join(projDir, "mcp-marker-proj")
+		const globalMarker = join(projDir, "mcp-marker-global")
+		// distinct server names — project and global mcp.json merge by name,
+		// and a collision would shadow one probe.
+		const mcp = (name: string, marker: string) =>
+			JSON.stringify({ mcpServers: { [name]: { command: "sh", args: ["-c", `touch ${marker}; sleep 5`] } } })
+		writeFileSync(join(projDir, ".overclock", "mcp.json"), mcp("probe-proj", projMarker))
+		writeFileSync(join(agentDir, "mcp.json"), mcp("probe-global", globalMarker))
+		new ProjectTrustStore(agentDir).set(projDir, true)
+
+		const runOC = (args: string[], cwd: string) =>
+			new Promise<{ status: number | null; stdout: string; stderr: string }>((res) => {
+				const c = spawn(BIN, args, { env, cwd, stdio: ["ignore", "pipe", "pipe"] })
+				let stdout = ""
+				let stderr = ""
+				c.stdout.on("data", (d) => (stdout += d))
+				c.stderr.on("data", (d) => (stderr += d))
+				c.on("exit", (status) => res({ status, stdout, stderr }))
+				setTimeout(() => c.kill("SIGKILL"), 90_000)
+			})
+		// markers land when the MCP extension spawns the server — allow ~2s
+		// after exit before judging, so the assertions aren't racy.
+		const settle = async (p: string) => {
+			for (let i = 0; i < 40 && !existsSync(p); i++) await new Promise((r) => setTimeout(r, 50))
+			return existsSync(p)
+		}
+
+		// control — default mode, trusted project
+		const rc = await runOC(["-p", "hello"], projDir)
+		const projHit = await settle(projMarker)
+		const globHit = await settle(globalMarker)
+		check("F15 control: project mcp.json command ran", projHit)
+		check("F15 control: global mcp.json command ran", globHit)
+		check("F15 control: run exits 0", rc.status === 0, `status=${rc.status} stderr=${rc.stderr?.slice(-200)}`)
+
+		// safe — neither config may execute, safe tools on the wire
+		rmSync(projMarker, { force: true })
+		rmSync(globalMarker, { force: true })
+		const postsBeforeSafe = posts
+		const rs = await runOC(["--safe", "-p", "hello"], projDir)
+		await new Promise((r) => setTimeout(r, 2000))
+		check("F15 safe: project mcp.json NOT executed", !existsSync(projMarker))
+		check("F15 safe: global mcp.json NOT executed", !existsSync(globalMarker))
+		check("F15 safe: run exits 0", rs.status === 0, `status=${rs.status} stderr=${rs.stderr?.slice(-200)}`)
+		check("F15 safe: request still reached mock", posts > postsBeforeSafe)
+		check(
+			"F15 safe: wire tools are exactly the safe five",
+			(lastPayload?.tools as { function?: { name?: string } }[] | undefined)
+				?.map((t) => t.function?.name)
+				.join(",") === "read,grep,find,ls,explore",
+		)
+
+		// --safe must reject --approve/-a (pi would take the last one)
+		for (const flag of ["-a", "--approve"]) {
+			const before = posts
+			const ra = await runOC(["--safe", flag, "-p", "hello"], projDir)
+			check(`F15: --safe ${flag} exits 1`, ra.status === 1, `status=${ra.status}`)
+			check(`F15: --safe ${flag} explains`, /cannot be combined/.test(ra.stderr ?? ""), ra.stderr?.slice(0, 160))
+			check(`F15: --safe ${flag} sent no request`, posts === before)
+		}
+		// args after `--` are prompt text, not flags
+		const rp = await runOC(["-p", "--", "--safe", "-a"], projDir)
+		check("F15: `-- --safe -a` not treated as flags", rp.status === 0 && !/cannot be combined/.test(rp.stderr ?? ""), `status=${rp.status} ${rp.stderr?.slice(0, 160)}`)
+
+		rmSync(join(agentDir, "mcp.json"), { force: true })
+		rmSync(projDir, { recursive: true, force: true })
 	}
 } finally {
 	server.close()

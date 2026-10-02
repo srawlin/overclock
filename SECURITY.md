@@ -41,9 +41,9 @@ configured LLM endpoint. The three boundaries that matter:
 | F12 | LOW      | Version check phones home to pi.dev on every session start | Open |
 | F13 | LOW      | No sub-agent turn/time/token cap — unbounded spend possible | Open |
 | F14 | LOW      | Hygiene: stale `bin/` gitignore rule; `ln -sf` clobbers existing files | **Fixed** (1 won't-fix, documented) |
-| F15 | MEDIUM   | pi 1.0: `--safe` doesn't stop configured MCP servers (or trusted-project extensions) from executing commands | Open |
+| F15 | MEDIUM   | pi 1.0: `--safe` doesn't stop configured MCP servers (or trusted-project extensions) from executing commands | **Fixed** |
 | F16 | LOW      | pi 1.0: `brace-expansion@5.0.9` (3 DoS advisories) pinned by pi's shrinkwrap and inlined in its CLI bundle | Open (upstream) |
-| F17 | LOW      | pi phone-homes not covered by F12: install telemetry + model-catalog refresh to pi.dev | Open |
+| F17 | LOW      | pi phone-homes not covered by F12: install telemetry + model-catalog refresh to pi.dev | **Fixed** (telemetry) / residual: catalog refresh |
 
 ---
 
@@ -459,7 +459,18 @@ handshake and advertises a tool). Still a self-review, not an external audit.
 
 ### F15 — `--safe` doesn't stop configured MCP servers or trusted-project extensions
 
-**Severity: MEDIUM. Status: Open.**
+**Severity: MEDIUM. Status: FIXED.**
+
+**Fixed:** the launcher now also passes `--no-approve` (project forced
+untrusted — no project `mcp.json`, extensions, settings, skills, or prompts,
+even if previously trusted) and `--no-extensions` (disables discovered and
+built-in extensions, including MCP — the launcher's explicit `--extension`
+still loads overclock). `--safe` combined with `-a`/`--approve` is rejected:
+pi honors the last flag, so a user-passed `-a` would silently undo the
+protection. The e2e suite covers this: a control run (default mode,
+remembered-trust project + global `mcp.json`) executes both marker commands;
+the `--safe` run executes neither while still reaching the model with exactly
+the five read-only tools.
 
 **Location:** `bin/overclock` (`--safe` only narrows `--tools`); pi
 `dist/extensions/mcp/index.js` (`session_start` → `startConnection`),
@@ -532,8 +543,15 @@ Then bump pi and re-run `npm audit`.
 
 ### F17 — pi's own pi.dev calls (install telemetry, model catalog)
 
-**Severity: LOW (privacy). Status: Open.** Present in 0.87.1 too; missed by the
-first review, which only covered overclock's own version check (F12).
+**Severity: LOW (privacy). Status: FIXED (telemetry) — residual noted.**
+Present in 0.87.1 too; missed by the first review, which only covered
+overclock's own version check (F12).
+
+**Fixed:** the launcher exports `PI_TELEMETRY=0` unless the user already set
+it (opt in with `PI_TELEMETRY=1`; the env var takes precedence over pi's
+`enableInstallTelemetry` setting). **Residual:** the model-catalog refresh
+still runs in interactive mode (version + IP + User-Agent only); disable with
+`PI_OFFLINE=1`, which also disables overclock's own update notice.
 
 - **Install telemetry:** on the first interactive run and on the first run after
   every pi version change, pi sends `GET https://pi.dev/api/report-install?version=…`
