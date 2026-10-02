@@ -28,7 +28,12 @@ turnToolCall("t2")
 const rec = turnEnd("t2")!
 check("turnEnd returns record", rec !== undefined)
 check("firstToken < totalMs", rec.firstTokenMs <= rec.totalMs)
-check("firstToken ~15ms not ~30ms (recorded once)", rec.firstTokenMs < 25, `got ${rec.firstTokenMs}ms`)
+// first-token semantics: the ~15ms stamp must be the FIRST call's, not the
+// second's (~30ms). Compare the delta instead of an absolute bound —
+// Atomics.wait can oversleep arbitrarily under CI load, but the gap between
+// the two stamps is still the second sleep (~15ms), whereas an overwritten
+// stamp would sit at ~0ms from totalMs.
+check("firstToken recorded once (≈15ms gap from total)", rec.totalMs - rec.firstTokenMs >= 5, `first=${rec.firstTokenMs}ms total=${rec.totalMs}ms`)
 check("output tokens summed", rec.outputTok === 150)
 check("toolCalls counted", rec.toolCalls === 1)
 check("tokensPerSec derived", rec.outputTokPerSec > 0)

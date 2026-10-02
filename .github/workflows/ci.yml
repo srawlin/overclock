@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22 # pi needs >= 22.19; latest 22.x
+          cache: npm
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2 # pinned to the version used locally
+      # npm ci must run the postinstall — the e2e suite asserts the piConfig
+      # rebranding it applies.
+      - run: npm ci
+      - run: bash -n bin/overclock && bash -n install.sh
+      - run: npm run typecheck
+      # The real-API eval (npm run eval) is intentionally absent: it needs the
+      # Cerebras key and burns tokens — local-only.
+      - run: npm test
+
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      # Gate on critical only: the one known high (SECURITY.md F16 —
+      # brace-expansion pinned by pi's own npm-shrinkwrap) can't be fixed
+      # here and is already documented.
+      - run: npm audit --omit=dev --audit-level=critical
