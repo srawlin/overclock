@@ -63,6 +63,11 @@ export function subAgentReasoningEffort(): string | undefined {
 	return raw ? raw : undefined
 }
 
+/** Max assistant turns per sub-agent run; 0 = unlimited (F13). */
+export function subAgentMaxTurns(name: "explore" | "delegate" | "verify"): number {
+	return envInt("SUBAGENT_MAX_TURNS", name === "delegate" ? 40 : 20)
+}
+
 /** Optional sampling temperature for all main-loop requests. */
 export function temperatureOverride(): number | undefined {
 	const raw = envVar("TEMPERATURE")

@@ -39,7 +39,7 @@ configured LLM endpoint. The three boundaries that matter:
 | F10 | LOW      | `.env` not in `.gitignore` — API key committable | **Fixed** |
 | F11 | LOW      | `postinstall.mjs` mutates `node_modules` after npm integrity checks | Open |
 | F12 | LOW      | Version check phones home to pi.dev on every session start | Open |
-| F13 | LOW      | No sub-agent turn/time/token cap — unbounded spend possible | Open |
+| F13 | LOW      | No sub-agent turn/time/token cap — unbounded spend possible | **Fixed** (turn cap) / residual: no time/token ceiling |
 | F14 | LOW      | Hygiene: stale `bin/` gitignore rule; `ln -sf` clobbers existing files | **Fixed** (1 won't-fix, documented) |
 | F15 | MEDIUM   | pi 1.0: `--safe` doesn't stop configured MCP servers (or trusted-project extensions) from executing commands | **Fixed** |
 | F16 | LOW      | pi 1.0: `brace-expansion@5.0.9` (3 DoS advisories) pinned by pi's shrinkwrap and inlined in its CLI bundle | Open (upstream) |
@@ -383,6 +383,15 @@ honored. **Fix (optional):** also honor `OVERCLOCK_NO_UPDATE_CHECK=1` for parity
 with pi's own kill-switch convention, and document the call.
 
 ### F13 — No sub-agent turn/time/token budget
+
+**Status: FIXED (turn cap) — residual noted.**
+
+**Fixed:** `OVERCLOCK_SUBAGENT_MAX_TURNS` caps sub-agent turns — explore/verify
+20, delegate 40; `0` is unlimited. At the cap the sub-agent is steered to
+answer now; if it keeps calling tools past the cap the run is aborted. The
+tool result carries a "stopped at its N-turn limit" note and the metrics
+`subagent` record gains `capped`/`maxTurns`. **Residual:** still no
+wall-clock or token ceiling per sub-agent or per run.
 
 **Location:** `extensions/overclock/subagents.ts` — `agent.prompt(task)` runs
 until the model stops.

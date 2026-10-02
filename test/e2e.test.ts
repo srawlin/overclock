@@ -31,15 +31,58 @@ function check(name: string, cond: boolean, extra = "") {
 
 const REPLY = "pong-from-mock"
 
+function sseChunk(delta: Record<string, unknown>, finish: string | null, usage?: unknown): string {
+	return `data: ${JSON.stringify({ id: "mock-1", object: "chat.completion.chunk", created: 1, model: "qwen-3.8-27b", choices: [{ index: 0, delta, finish_reason: finish }], ...(usage ? { usage } : {}) })}\n\n`
+}
+
 function sse(): string {
-	const chunk = (delta: Record<string, unknown>, finish: string | null, usage?: unknown) =>
-		`data: ${JSON.stringify({ id: "mock-1", object: "chat.completion.chunk", created: 1, model: "qwen-3.8-27b", choices: [{ index: 0, delta, finish_reason: finish }], ...(usage ? { usage } : {}) })}\n\n`
 	return (
-		chunk({ role: "assistant" }, null) +
-		chunk({ content: REPLY }, null) +
-		chunk({}, "stop", { prompt_tokens: 42, completion_tokens: 4, total_tokens: 46 }) +
+		sseChunk({ role: "assistant" }, null) +
+		sseChunk({ content: REPLY }, null) +
+		sseChunk({}, "stop", { prompt_tokens: 42, completion_tokens: 4, total_tokens: 46 }) +
 		"data: [DONE]\n\n"
 	)
+}
+
+const sseText = (text: string) =>
+	sseChunk({ role: "assistant" }, null) +
+	sseChunk({ content: text }, null) +
+	sseChunk({}, "stop", { prompt_tokens: 42, completion_tokens: 4, total_tokens: 46 }) +
+	"data: [DONE]\n\n"
+
+let callSeq = 0
+const sseToolCall = (name: string, args: string) =>
+	sseChunk({ role: "assistant" }, null) +
+	sseChunk({ tool_calls: [{ index: 0, id: `call_${++callSeq}`, type: "function", function: { name, arguments: args } }] }, null) +
+	sseChunk({}, "tool_calls", { prompt_tokens: 42, completion_tokens: 4, total_tokens: 46 }) +
+	"data: [DONE]\n\n"
+
+// Turn-cap scenarios: classify each POST. Sub-agent requests carry the explore
+// system prompt; the main loop's requests either start the explore call or
+// arrive with its tool result.
+let mockMode: "fixed" | "cap-complies" | "cap-ignores" = "fixed"
+let explorePosts = 0
+let exploreResultText = ""
+let finalMainPosts = 0
+
+function turncapReply(bodyJson: Record<string, unknown>): string {
+	const messages = (bodyJson.messages ?? []) as { role?: string; content?: unknown }[]
+	const sys = messages.find((m) => m.role === "system")
+	const sysText = typeof sys?.content === "string" ? sys.content : JSON.stringify(sys?.content ?? "")
+	const bodyStr = JSON.stringify(bodyJson)
+	if (sysText.includes("read-only exploration sub-agent")) {
+		explorePosts++
+		if (bodyStr.includes("Turn limit reached"))
+			return mockMode === "cap-complies" ? sseText("partial-answer-from-explore") : sseToolCall("ls", `{"path":"."}`)
+		return sseToolCall("ls", `{"path":"."}`)
+	}
+	const toolMsg = messages.find((m) => m.role === "tool")
+	if (toolMsg) {
+		finalMainPosts++
+		exploreResultText = typeof toolMsg.content === "string" ? toolMsg.content : JSON.stringify(toolMsg.content)
+		return sseText("done")
+	}
+	return sseToolCall("explore", `{"task":"find the bug"}`)
 }
 
 // --- 1. launcher smoke: --version must work with no API key, fast ---
@@ -120,7 +163,7 @@ const server: Server = createServer((req, res) => {
 			"cache-control": "no-cache",
 			connection: "keep-alive",
 		})
-		res.end(sse())
+		res.end(mockMode === "fixed" || !lastPayload ? sse() : turncapReply(lastPayload))
 	})
 })
 
@@ -297,6 +340,70 @@ try {
 
 		rmSync(join(agentDir, "mcp.json"), { force: true })
 		rmSync(projDir, { recursive: true, force: true })
+	}
+
+	// --- 6. F13: sub-agent turn cap ---
+	// With OVERCLOCK_SUBAGENT_MAX_TURNS=3, the explore sub-agent gets a wrap-up
+	// steer after its 3rd tool turn. "Complies" answers with text on turn 4;
+	// "ignores" calls a tool again and is aborted. Either way: 4 explore
+	// requests, a capped tool result, and a completed main loop.
+	{
+		const capCwd = realpathSync(mkdtempSync(join(tmpdir(), "overclock-e2e-cap-")))
+		const capEnv = { ...env, OVERCLOCK_SUBAGENT_MAX_TURNS: "3" }
+		const runCap = () =>
+			new Promise<{ status: number | null; stdout: string; stderr: string }>((res) => {
+				const c = spawn(BIN, ["-p", "investigate with explore"], { env: capEnv, cwd: capCwd, stdio: ["ignore", "pipe", "pipe"] })
+				let stdout = ""
+				let stderr = ""
+				c.stdout.on("data", (d) => (stdout += d))
+				c.stderr.on("data", (d) => (stderr += d))
+				c.on("exit", (status) => res({ status, stdout, stderr }))
+				setTimeout(() => c.kill("SIGKILL"), 90_000)
+			})
+
+		mockMode = "cap-complies"
+		explorePosts = 0
+		exploreResultText = ""
+		finalMainPosts = 0
+		const rComp = await runCap()
+		mockMode = "fixed"
+		check("cap/complies: run exits 0", rComp.status === 0, `status=${rComp.status} stderr=${rComp.stderr?.slice(-200)}`)
+		check("cap/complies: explore stopped at 4 requests (3 turns + wrap-up)", explorePosts === 4, `posts=${explorePosts}`)
+		check("cap/complies: tool result carries the partial answer", exploreResultText.includes("partial-answer-from-explore"), exploreResultText.slice(0, 160))
+		check("cap/complies: tool result notes the 3-turn limit", exploreResultText.includes("3-turn limit"), exploreResultText.slice(0, 160))
+		check("cap/complies: main loop finished", finalMainPosts === 1, `finalMainPosts=${finalMainPosts}`)
+		{
+			const files = readdirSync(join(agentDir, "logs")).filter((f) => f.startsWith("metrics-"))
+			const recs = files.flatMap((f) =>
+				readFileSync(join(agentDir, "logs", f), "utf8")
+					.split("\n")
+					.filter(Boolean)
+					.map((l) => {
+						try {
+							return JSON.parse(l)
+						} catch {
+							return null
+						}
+					})
+					.filter(Boolean),
+			)
+			const sub = recs.find((l) => l.kind === "subagent" && l.capped === true)
+			check("cap/complies: metrics has capped subagent record", !!sub)
+			check("cap/complies: subagent record has maxTurns=3", sub?.maxTurns === 3, JSON.stringify(sub))
+		}
+
+		mockMode = "cap-ignores"
+		explorePosts = 0
+		exploreResultText = ""
+		finalMainPosts = 0
+		const rIgn = await runCap()
+		mockMode = "fixed"
+		check("cap/ignores: run exits 0", rIgn.status === 0, `status=${rIgn.status} stderr=${rIgn.stderr?.slice(-200)}`)
+		check("cap/ignores: explore aborted at 4 requests (no 5th)", explorePosts === 4, `posts=${explorePosts}`)
+		check("cap/ignores: tool result notes the 3-turn limit", exploreResultText.includes("3-turn limit"), exploreResultText.slice(0, 160))
+		check("cap/ignores: main loop finished", finalMainPosts === 1, `finalMainPosts=${finalMainPosts}`)
+
+		rmSync(capCwd, { recursive: true, force: true })
 	}
 } finally {
 	server.close()

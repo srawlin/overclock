@@ -65,6 +65,7 @@ Exit with `/exit`, `/quit`, or Ctrl-D — the session-resume hint printed on exi
 | `OVERCLOCK_KEEP_TOKENS` / `_HARD_BUDGET_TOKENS` / `_TIGHT_KEEP_TOKENS` / `_MAX_OUT_TOKENS` | 16k / 80k / 4k / 16k | Individual context/output knobs (override the preset) |
 | `OVERCLOCK_REASONING` | `low` (session setting) | Wire `reasoning_effort`: `low`/`medium`/`high`/`off`. **Warning:** `off` disables tool calls on qwen-3.8-27b — probe only |
 | `OVERCLOCK_SUBAGENT_REASONING` | `low` | Same for sub-agent inner requests |
+| `OVERCLOCK_SUBAGENT_MAX_TURNS` | explore/verify `20`, delegate `40` | Sub-agent turn cap: at the cap the sub-agent is told to answer now, and stopped if it keeps calling tools. `0` = unlimited |
 | `OVERCLOCK_TEMPERATURE` | provider default | Sampling temperature for main-loop requests |
 | `OVERCLOCK_DEBUG` | off | Per-request wire-size stats to stderr |
 | `OVERCLOCK_API_BASE` | `api.cerebras.ai/v1` | Custom endpoint (proxy/gateway/test). Must be `https://` — `http://` accepted only for localhost |

@@ -22,7 +22,8 @@ const MAX_SLEEP_MS = 10_000
 const window: { ts: number; tokens: number }[] = []
 
 /** Soft token-per-minute pacing shared by main and sub-agent requests. */
-export async function paceRequest(estimatedTokens: number): Promise<void> {
+export async function paceRequest(estimatedTokens: number, signal?: AbortSignal): Promise<void> {
+	if (signal?.aborted) return
 	const now = Date.now()
 	while (window.length && now - window[0].ts > WINDOW_MS) window.shift()
 	let used = window.reduce((sum, w) => sum + w.tokens, 0)
@@ -37,18 +38,28 @@ export async function paceRequest(estimatedTokens: number): Promise<void> {
 		const delay = Math.min(wake - now, MAX_SLEEP_MS)
 		if (delay > 0) {
 			logMetrics({ kind: "pace", delayMs: delay, windowTokens: used })
-			await new Promise((resolve) => {
-				const timer = setTimeout(resolve, delay)
-				// A pending pace must not hold the process open on shutdown.
-				;(timer as unknown as { unref?: () => void }).unref?.()
+			// Ref'd on purpose: in print/json mode this sleep may be the only
+			// pending work, and an unref'd timer let the process exit mid-task.
+			// Abort cancels it so /exit and Ctrl-C aren't delayed.
+			const finished = await new Promise<boolean>((resolve) => {
+				const onAbort = () => {
+					clearTimeout(timer)
+					resolve(false)
+				}
+				const timer = setTimeout(() => {
+					signal?.removeEventListener("abort", onAbort)
+					resolve(true)
+				}, delay)
+				signal?.addEventListener("abort", onAbort, { once: true })
 			})
+			if (!finished) return
 		}
 	}
 	window.push({ ts: Date.now(), tokens: estimatedTokens })
 }
 
 export function installProviderTuning(pi: ExtensionAPI) {
-	pi.on("before_provider_request", async (event) => {
+	pi.on("before_provider_request", async (event, ctx) => {
 		const p = event.payload as Record<string, unknown>
 		const isQwen = typeof p.model === "string" && p.model.includes("qwen")
 		if (isQwen) {
@@ -76,7 +87,7 @@ export function installProviderTuning(pi: ExtensionAPI) {
 		if (temp !== undefined) p.temperature = temp
 
 		const reserved = typeof p.max_completion_tokens === "number" ? p.max_completion_tokens : maxCompletionTokens()
-		await paceRequest(Math.ceil(JSON.stringify(p).length / 4) + reserved)
+		await paceRequest(Math.ceil(JSON.stringify(p).length / 4) + reserved, ctx.signal)
 		return p
 	})
 }

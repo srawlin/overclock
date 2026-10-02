@@ -13,7 +13,7 @@ import { Type } from "typebox"
 import { pruneContext } from "./context-budget"
 import { logMetrics } from "./metrics"
 import { paceRequest } from "./provider-tuning"
-import { envVar, subAgentReasoningEffort } from "./knobs"
+import { envVar, subAgentMaxTurns, subAgentReasoningEffort } from "./knobs"
 
 // Cerebras enforces RPM and TPM per org. Sub-agents multiply request rate, so
 // cap concurrency — three in-flight sub-agents is plenty at ~1500 tok/s.
@@ -51,6 +51,7 @@ interface SubAgentDetails {
 	turns: number
 	inputTokens?: number
 	outputTokens?: number
+	capped?: boolean
 	error?: string
 }
 
@@ -93,6 +94,11 @@ type Toolset = "read-only" | "coding" | "verify"
 // than the main 27b model on Cerebras. Only SUB-AGENTS are ever re-routed (see
 // the invariant above); the main session model is never changed mid-task.
 const DEFAULT_EXPLORE_MODEL = "gpt-oss-120b"
+
+// Delivered via steer() when a sub-agent hits its turn cap — asks for a final
+// answer on the next turn instead of another tool call.
+const WRAP_UP = (cap: number) =>
+	`Turn limit reached (${cap} turns). Do not call any more tools. Reply now with your final answer based on what you have found so far, and say what you could not finish.`
 
 /** Model routing per sub-agent role. Explore defaults to a cheaper, faster
  *  search-oriented model; env vars below let callers tune or disable it.
@@ -162,17 +168,36 @@ async function runSubAgent(
 						const effort = subAgentReasoningEffort()
 						if (effort) p.reasoning_effort = effort
 						const reserved = typeof p.max_completion_tokens === "number" ? p.max_completion_tokens : 16_384
-						await paceRequest(Math.ceil(JSON.stringify(p).length / 4) + reserved)
+						// o.signal is the run's own abort signal (turn cap or
+						// caller abort via agent.abort()) — pacing must not hold
+						// the process open once the run is dead, nor delay it.
+						await paceRequest(Math.ceil(JSON.stringify(p).length / 4) + reserved, o?.signal)
 						return p
 					},
 				}),
 			toolExecution: "parallel",
 		})
 		let turns = 0
+		let capped = false
+		let capAborted = false
+		const cap = subAgentMaxTurns(name)
 		agent.subscribe((event) => {
 			if (event.type === "turn_end") {
 				turns++
 				onUpdate?.({ content: [{ type: "text", text: `sub-agent running (turn ${turns})` }], details: { turns } })
+				// Turn cap (F13): at the cap, steer a wrap-up instead of letting
+				// another tool turn run; if the model keeps calling tools past
+				// it, abort the run — an uncapped sub-agent is a spend bug.
+				const content = (event.message as { content?: unknown }).content
+				const madeToolCalls =
+					Array.isArray(content) && (content as { type?: string }[]).some((p) => p?.type === "toolCall")
+				if (cap > 0 && turns === cap && madeToolCalls) {
+					capped = true
+					agent.steer({ role: "user", content: [{ type: "text", text: WRAP_UP(cap) }], timestamp: Date.now() })
+				} else if (cap > 0 && turns > cap && madeToolCalls) {
+					capAborted = true
+					agent.abort()
+				}
 			}
 		})
 		await Promise.race([
@@ -180,7 +205,11 @@ async function runSubAgent(
 			new Promise<never>((_, reject) => signal?.addEventListener("abort", () => reject(new Error("aborted")))),
 		]).catch((error) => {
 			agent.abort()
-			throw error
+			// Caller cancellation and genuine errors propagate; a rejection
+			// caused by our own turn-cap abort is normal completion (pi's
+			// Agent currently resolves prompt() on abort via handleRunFailure,
+			// but don't rely on that staying true).
+			if (signal?.aborted || !capAborted) throw error
 		})
 
 		const last = [...agent.state.messages].reverse().find((m) => m.role === "assistant")
@@ -199,10 +228,22 @@ async function runSubAgent(
 				outputTokens += u.output ?? 0
 			}
 		}
-		logMetrics({ kind: "subagent", name, model: model.id, turns, inputTokens, outputTokens, ms: Date.now() - start })
+		logMetrics({
+			kind: "subagent",
+			name,
+			model: model.id,
+			turns,
+			inputTokens,
+			outputTokens,
+			capped,
+			maxTurns: cap,
+			ms: Date.now() - start,
+		})
+		const out = (text || "(sub-agent produced no output)") +
+			(capped ? `\n\n[${name} stopped at its ${cap}-turn limit — the answer may be incomplete]` : "")
 		return {
-			content: [{ type: "text", text: text || "(sub-agent produced no output)" }],
-			details: { turns, inputTokens, outputTokens },
+			content: [{ type: "text", text: out }],
+			details: { turns, inputTokens, outputTokens, ...(capped ? { capped: true } : {}) },
 		}
 	} finally {
 		release()
