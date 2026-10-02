@@ -5,6 +5,9 @@ Review date: 2026-09-24. Scope: `bin/overclock`, `install.sh`, `scripts/postinst
 configures (`@earendil-works/pi-coding-agent` 0.87.1). This is a self-review, not an
 external audit.
 
+**Addendum 2026-10-02:** re-reviewed after the upgrade to pi 1.0.0 — see
+[pi 1.0.0 re-review](#pi-100-re-review-2026-10-02) (findings F15–F17).
+
 ## Threat model
 
 overclock is a coding agent: the model can read files, edit files, and run arbitrary
@@ -38,6 +41,9 @@ configured LLM endpoint. The three boundaries that matter:
 | F12 | LOW      | Version check phones home to pi.dev on every session start | Open |
 | F13 | LOW      | No sub-agent turn/time/token cap — unbounded spend possible | Open |
 | F14 | LOW      | Hygiene: stale `bin/` gitignore rule; `ln -sf` clobbers existing files | **Fixed** (1 won't-fix, documented) |
+| F15 | MEDIUM   | pi 1.0: `--safe` doesn't stop configured MCP servers (or trusted-project extensions) from executing commands | Open |
+| F16 | LOW      | pi 1.0: `brace-expansion@5.0.9` (3 DoS advisories) pinned by pi's shrinkwrap and inlined in its CLI bundle | Open (upstream) |
+| F17 | LOW      | pi phone-homes not covered by F12: install telemetry + model-catalog refresh to pi.dev | Open |
 
 ---
 
@@ -406,6 +412,154 @@ Consider a run-level token ceiling for the main loop too.
   is pathological; the workaround is a relative path (`--session-dir ./-name`).
   Note: pi's parser has no `--flag=value` form, so that escape doesn't exist —
   this finding's original note was wrong on that point.
+
+---
+
+## pi 1.0.0 re-review (2026-10-02)
+
+Scope: the delta from `@earendil-works/pi-coding-agent` 0.87.1 → 1.0.0 (with
+`pi-ai`/`pi-agent-core` 1.0.0) as overclock configures it, plus re-checking the
+pi-dependent findings above. Method: diffed the 0.87.1 and 1.0.0 `dist/` trees and
+CHANGELOG, read the new code paths, `npm audit`, and ran the real launcher in
+print mode against a local mock endpoint with probe configs (a stdio "MCP server"
+whose command touches a marker file; a second variant that completes the MCP
+handshake and advertises a tool). Still a self-review, not an external audit.
+
+### What changed in pi that matters here
+
+- **Built-in extensions load by default** (since 0.99.0): `mcp`, `codemode`,
+  `tool-search`, `llama.cpp`. overclock does not pass `--no-extensions`, so all
+  four load alongside the overclock extension.
+- **MCP servers** come from `~/.overclock/agent/mcp.json` (global) and, once a
+  project is trusted, `<project>/.overclock/mcp.json`. `mcp.json` joins the
+  trust-requiring project resources (`settings.json`, `extensions`, `skills`, …).
+  Enabled stdio servers are spawned on `session_start`.
+- **codemode** runs model-written JS in a QuickJS sandbox that can call active
+  `direct` tools and any `codemode`/`deferred`-exposed tool (e.g. MCP tools), via
+  `ctx.executeTool` with the normal tool hooks.
+- **Fullscreen TUI** is the default (adopted; no security impact).
+
+### Re-verification of earlier findings
+
+- **F2** still holds: pi's `!command` apiKey resolution is unchanged
+  (`core/resolve-config-value.js`), and the e2e suite passes on 1.0.0 (key file
+  `0600`, key reaches the wire with the env var removed). `getShellEnv()` still
+  passes the full `process.env` to spawned commands, so the residual note stands.
+- **F5, F6, F10, F14** are overclock-only code, unchanged by the upgrade.
+- **F8** `--safe` tool allowlist still holds on the wire: with `--safe` the request
+  declares exactly `read,grep,find,ls,explore`, even with a handshaking MCP server
+  that advertises a tool — no `codemode`, `tool_search`, MCP tools, or
+  `mcp_servers` prompt section were sent. Default mode likewise sends only the
+  ten overclock tools. **But** see F15: the allowlist limits what the *model* can
+  call, not what pi itself executes at startup.
+- **F11** postinstall still applies cleanly to 1.0.0 (both literal patches and
+  `piConfig` verified after install).
+- **F12** unchanged; pi still honors `PI_SKIP_VERSION_CHECK` for its own banner
+  (`utils/version-check.js`). F17 covers pi's other pi.dev calls.
+
+### F15 — `--safe` doesn't stop configured MCP servers or trusted-project extensions
+
+**Severity: MEDIUM. Status: Open.**
+
+**Location:** `bin/overclock` (`--safe` only narrows `--tools`); pi
+`dist/extensions/mcp/index.js` (`session_start` → `startConnection`),
+`dist/extensions/mcp/config.js` (`loadMcpConfig`), `dist/core/project-trust.js`.
+
+`--safe` is documented as "no bash, no writes" for untrusted repos, but it is
+implemented purely as a `--tools` allowlist. pi 1.0's built-in MCP extension
+spawns every enabled stdio server's `command` at session start, regardless of
+`--tools`. Verified in print mode:
+
+| Config | `--safe` result |
+|---|---|
+| Global `~/.overclock/agent/mcp.json` | command **executed** |
+| Project `.overclock/mcp.json`, project not trusted | ignored (silently) |
+| Project `.overclock/mcp.json`, project trusted (`-a`) | command **executed** |
+| Either config + `--no-approve --no-extensions` | not executed; tools still exactly the safe five |
+
+The global case runs the user's own configured commands — low concern on its own.
+The project case is the real gap: trust is remembered in `trust.json` (or forced
+by `-a` / `defaultProjectTrust: "always"`), so a user who trusted a repo once and
+later reaches for `--safe` because they doubt it still gets that repo's
+`mcp.json` commands executed. The same remembered trust also loads the repo's
+`.overclock/extensions` (arbitrary code) under `--safe` — that part predates
+1.0 and was not called out under F8; 1.0 adds `mcp.json` as a second, simpler
+route (a JSON command line instead of an extension module).
+
+No `--safe` run sent MCP tools or `codemode` to the model, so the exposure is
+code execution from configuration, not new model-reachable tools.
+
+**Fix:** in `--safe`, have the launcher also pass `--no-approve` (forces the
+project untrusted: no project `mcp.json`, extensions, settings, skills, or
+prompts) and `--no-extensions` (disables discovered and built-in extensions,
+including MCP; the launcher's explicit `--extension` path still loads — verified
+the overclock extension, provider, and `explore` keep working). Add an e2e
+regression test that plants a project `mcp.json` with a marker command, trusts the
+project, runs `--safe`, and asserts no marker. Update README's `--safe` text to
+say it also ignores project config and MCP servers.
+
+### F16 — `brace-expansion@5.0.9` pinned by pi's shrinkwrap and inlined in its bundle
+
+**Severity: LOW (npm audit: high). Status: Open — needs an upstream pi release.**
+
+**Location:** `node_modules/@earendil-works/pi-coding-agent/npm-shrinkwrap.json`
+(`minimatch@10.2.6 → brace-expansion@5.0.9`); the same code is inlined into pi's
+CLI bundle (`dist/bundle/chunks/chunk-*.js`), which is what `overclock` runs.
+
+`npm audit` reports GHSA-qhr7-859c-m2p7 and GHSA-6j4f-fj2g-mc7p (stack-exhaustion
+DoS, high) and GHSA-q2hr-2g5m-vwhr (quadratic CPU DoS, moderate); fixed in 5.0.12.
+This is the only audit finding and was already present with pi 0.87.1.
+
+**Why it can't be fixed here:** pi publishes an `npm-shrinkwrap.json`, and npm
+lets a dependency's shrinkwrap pin its own subtree — a root
+`"overrides": { "brace-expansion": "5.0.12" }` is recognized by `npm explain` but
+not applied (tried; tree and lockfile stay on 5.0.9). Even if the `node_modules`
+copy were swapped, the CLI executes the copy esbuild inlined into the bundle.
+Patching the minified bundle from `postinstall.mjs` would break F11's rule
+(patches stay cosmetic) and was rejected.
+
+**Reachability:** in pi, `minimatch` is only called on model-scope glob patterns
+(`--models` / `enabledModels`, `core/model-resolver.js`) and package resource
+filters from settings (`core/package-manager.js`). Both come from the user's CLI
+args or settings (global, or project settings only when trusted) — not from model
+output, tool arguments, or file contents. Worst case is a crash at startup, caused
+by config that could already do worse (a trusted project can load extensions).
+
+**Fix:** ask upstream to regenerate the coding-agent shrinkwrap with
+`brace-expansion >= 5.0.12` (minimatch's `^5.0.8` range already allows it; pi did
+the same for earlier brace-expansion advisories — earendil-works/pi#7090, #7316).
+Then bump pi and re-run `npm audit`.
+
+### F17 — pi's own pi.dev calls (install telemetry, model catalog)
+
+**Severity: LOW (privacy). Status: Open.** Present in 0.87.1 too; missed by the
+first review, which only covered overclock's own version check (F12).
+
+- **Install telemetry:** on the first interactive run and on the first run after
+  every pi version change, pi sends `GET https://pi.dev/api/report-install?version=…`
+  with a pi User-Agent (`modes/interactive/interactive-mode.js`
+  `reportInstallTelemetry`). It defaults on (`enableInstallTelemetry` in settings);
+  `PI_TELEMETRY=0` or `PI_OFFLINE=1` disables it. Upgrading to 1.0.0 will trigger
+  one report on the next interactive launch.
+- **Model catalog refresh:** interactive sessions fetch
+  `https://pi.dev/api/models/providers/<id>` for built-in providers at most every
+  4 h (`core/remote-catalog-provider.js`); `PI_OFFLINE=1` disables it.
+- Not affected: pi's provider attribution headers (`core/provider-attribution.js`)
+  apply only to OpenRouter, NVIDIA NIM, Cloudflare and OpenCode — never to the
+  Cerebras provider overclock registers.
+
+Payloads are version + IP + User-Agent; no prompts, keys, or code. **Fix
+(optional):** export `PI_TELEMETRY=0` in `bin/overclock` by default (user can
+override), and document both calls next to F12.
+
+### Other 1.0.0 observations (no finding)
+
+- MCP `"auth": { "provider": … }` (forwarding a `/login` token to an HTTP MCP
+  server) is refused in project `mcp.json` and requires https off-loopback — good.
+- The built-in `llama.cpp` provider is registered and defaults to
+  `http://127.0.0.1:8080`; not reviewed further since overclock never selects it.
+- Default-mode request size is unchanged apart from one added system-prompt line
+  pointing at pi's MCP/codemode docs (+120 chars).
 
 ---
 
