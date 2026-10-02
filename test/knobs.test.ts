@@ -1,4 +1,4 @@
-import { hardBudgetTokens, keepRecentToolTokens, maxCompletionTokens, tightKeepTokens } from "../extensions/overclock/knobs"
+import { hardBudgetTokens, keepRecentToolTokens, maxCompletionTokens, subAgentMaxTurns, tightKeepTokens } from "../extensions/overclock/knobs"
 
 let passed = 0
 let failed = 0
@@ -23,6 +23,8 @@ const NAMES = [
 	"FASTCODE_HARD_BUDGET_TOKENS",
 	"FASTCODE_TIGHT_KEEP_TOKENS",
 	"FASTCODE_MAX_OUT_TOKENS",
+	"OVERCLOCK_SUBAGENT_MAX_TURNS",
+	"FASTCODE_SUBAGENT_MAX_TURNS",
 ]
 function clearEnv() {
 	for (const n of NAMES) delete process.env[n]
@@ -70,6 +72,22 @@ process.env.FASTCODE_KEEP_TOKENS = "7777"
 check("legacy FASTCODE_KEEP_TOKENS honored", keepRecentToolTokens() === 7_777)
 process.env.OVERCLOCK_KEEP_TOKENS = "9999"
 check("OVERCLOCK_* wins over legacy", keepRecentToolTokens() === 9_999)
+
+// --- sub-agent turn caps (F13) ---
+clearEnv()
+check("default explore cap 20", subAgentMaxTurns("explore") === 20)
+check("default verify cap 20", subAgentMaxTurns("verify") === 20)
+check("default delegate cap 40", subAgentMaxTurns("delegate") === 40)
+process.env.OVERCLOCK_SUBAGENT_MAX_TURNS = "5"
+check("SUBAGENT_MAX_TURNS=5 applies to all roles",
+	subAgentMaxTurns("explore") === 5 && subAgentMaxTurns("delegate") === 5 && subAgentMaxTurns("verify") === 5)
+process.env.OVERCLOCK_SUBAGENT_MAX_TURNS = "0"
+check("SUBAGENT_MAX_TURNS=0 means unlimited", subAgentMaxTurns("explore") === 0)
+process.env.OVERCLOCK_SUBAGENT_MAX_TURNS = "abc"
+check("garbage falls back to per-role defaults",
+	subAgentMaxTurns("explore") === 20 && subAgentMaxTurns("delegate") === 40)
+process.env.OVERCLOCK_SUBAGENT_MAX_TURNS = "-3"
+check("negative falls back", subAgentMaxTurns("verify") === 20)
 
 clearEnv()
 console.log(`\n${passed} passed, ${failed} failed`)

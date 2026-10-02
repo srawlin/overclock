@@ -72,7 +72,9 @@ a correct manifest can't be produced by editing the constants).
 **Interpreting a result:** a speed change *wins* when `in=` (input tokens → the
 latency driver) and wall clock drop **while pass rate and output quality hold**.
 Because grading is by the real test suite + diff, the harness guards against the
-"fast because it stopped thinking / stopped checking" failure mode.
+"fast because it stopped thinking / stopped checking" failure mode. Runs that
+exit without `agent_end` are flagged `incomplete` — a runtime failure (e.g. an
+early process exit), not a model-quality miss — and counted in the summary.
 
 ## 3. Experiments — faster without losing intelligence
 

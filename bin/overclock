@@ -102,6 +102,11 @@ fi
 # itself, with the right package name and upgrade path.
 export PI_SKIP_VERSION_CHECK=1
 
+# pi pings pi.dev/api/report-install on the first interactive run and after
+# every pi version change — default it off; users opt in with PI_TELEMETRY=1
+# (F17). PI_OFFLINE would also stop it but would kill our own update notice.
+export PI_TELEMETRY="${PI_TELEMETRY:-0}"
+
 # pi >= 0.75 needs node >= 22.19; an nvm install may exist without being
 # loaded in this shell (e.g. GUI apps, cron, other terminals).
 NODE_MAJOR="$(node -p 'parseInt(process.version.slice(1))' 2>/dev/null || echo 0)"
@@ -132,20 +137,40 @@ for ((i=1; i<=$#; i++)); do
 done
 
 # --safe: read-only mode for untrusted repos — drops every tool that can write
-# files or execute commands (F8). Consumed here; pi never sees the flag. Args
-# after `--` are prompt text, not flags.
+# files or execute commands (F8), forces the project untrusted (--no-approve:
+# no project mcp.json/extensions/settings/skills/prompts), and disables
+# discovered + built-in extensions incl. MCP — pi's MCP extension otherwise
+# spawns every configured server's command at session start even under a tools
+# allowlist (F15). The launcher's explicit --extension still loads overclock
+# itself. Consumed here; pi never sees the flag. Args after `--` are prompt
+# text, not flags.
 TOOLS="read,write,edit,bash,grep,find,ls,explore,delegate,verify"
+SAFE_ARGS=()
+want_safe=0
+want_approve=0
 filtered=()
 seen_dd=0
 for arg in "$@"; do
 	[ "$arg" = "--" ] && seen_dd=1
-	if [ "$seen_dd" = 0 ] && [ "$arg" = "--safe" ]; then
-		TOOLS="read,grep,find,ls,explore"
-		continue
+	if [ "$seen_dd" = 0 ]; then
+		case "$arg" in
+			--safe) want_safe=1; continue ;;
+			-a|--approve) want_approve=1 ;;
+		esac
 	fi
 	filtered+=("$arg")
 done
 set -- ${filtered[@]+"${filtered[@]}"}
+if [ "$want_safe" = 1 ]; then
+	# pi honors the last --approve/--no-approve, so a user-passed -a would
+	# silently undo ours — reject the combination instead.
+	if [ "$want_approve" = 1 ]; then
+		echo "overclock: --safe cannot be combined with --approve/-a (safe mode never trusts project config)" >&2
+		exit 1
+	fi
+	TOOLS="read,grep,find,ls,explore"
+	SAFE_ARGS=(--no-approve --no-extensions)
+fi
 
 # Prefer the pinned dependency. Falling back to a PATH pi means either deps are
 # missing or HERE resolved wrong — warn, since a random PATH binary is both a
@@ -164,4 +189,5 @@ exec "$PI" \
 	--extension "$HERE/extensions/overclock" \
 	--model "${OVERCLOCK_MODEL:-${FASTCODE_MODEL:-cerebras/qwen-3.8-27b}}" \
 	--tools "$TOOLS" \
+	${SAFE_ARGS[@]+"${SAFE_ARGS[@]}"} \
 	"$@"

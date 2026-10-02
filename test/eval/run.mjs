@@ -201,7 +201,10 @@ async function runOnce(task, idx, agentDir) {
 		task: task.name,
 		idx,
 		correct,
-		failed: timedOut || stream.sawError,
+		// A run that exits without agent_end stopped mid-task (crash, early
+		// process exit) — a harness/runtime failure, not a model quality miss.
+		failed: timedOut || stream.sawError || !stream.agentEnded,
+		incomplete: !timedOut && !stream.agentEnded,
 		timedOut,
 		exitCode,
 		wallSec: Math.round((wallMs / 1000) * 10) / 10,
@@ -250,7 +253,9 @@ async function main() {
 			const r = await runOnce(task, i, agentDir)
 			results.push(r)
 			const verdict = r.correct ? "PASS" : "FAIL"
-			const warn = r.failed ? `  [${[r.timedOut ? "timeout" : "", r.toolErrs ? `toolerr=${r.toolErrs}` : ""].filter(Boolean).join(",")}]` : ""
+			const warn = r.failed
+				? `  [${[r.timedOut ? "timeout" : "", r.incomplete ? `incomplete: no agent_end, exit=${r.exitCode}` : "", r.toolErrs ? `toolerr=${r.toolErrs}` : ""].filter(Boolean).join(",")}]`
+				: ""
 			console.log(
 				`  ${verdict}  ${r.task}#${r.idx}: ${r.wallSec}s  ${r.turns}turns  ${r.toolCalls}tools  ttft ${r.ttftMs}ms  ${r.tokPerSec}tok/s  in=${r.inputTok}tok (cache ${r.cacheReadTok})${warn}`,
 			)
@@ -267,6 +272,7 @@ async function main() {
 		const avg = (k) => rs.reduce((a, r) => a + r[k], 0) / rs.length
 		perTask[t.name] = {
 			pass: `${rs.filter((r) => r.correct).length}/${rs.length}`,
+			incomplete: rs.filter((r) => r.incomplete).length,
 			avgWallSec: +avg("wallSec").toFixed(1),
 			avgTurns: +avg("turns").toFixed(1),
 			avgTtftMs: Math.round(avg("ttftMs")),
@@ -281,6 +287,7 @@ async function main() {
 		passed: pass,
 		total: results.length,
 		passRate: results.length ? +((pass / results.length) * 100).toFixed(1) : 0,
+		incomplete: results.filter((r) => r.incomplete).length,
 		totalWallSec: +results.reduce((a, r) => a + r.wallSec, 0).toFixed(1),
 		perTask,
 	}
@@ -289,7 +296,9 @@ async function main() {
 	const outFile = join(outDir, `${new Date().toISOString().replace(/[:.]/g, "-")}-${MODEL.replace(/[^a-z0-9.-]/gi, "_")}.json`)
 	writeFileSync(outFile, JSON.stringify(summary, null, 2))
 
-	console.log(`\n# SUMMARY  pass ${pass}/${results.length} (${summary.passRate}%)  total wall ${summary.totalWallSec}s`)
+	console.log(
+		`\n# SUMMARY  pass ${pass}/${results.length} (${summary.passRate}%)  incomplete ${summary.incomplete}  total wall ${summary.totalWallSec}s`,
+	)
 	console.log(`# results -> ${outFile}`)
 	if (KEEP) console.log(`# kept workspaces for debugging -> ${agentDir}`)
 	else rmSync(agentDir, { recursive: true, force: true })
