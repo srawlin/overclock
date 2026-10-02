@@ -1,5 +1,7 @@
 # overclock
 
+[![CI](https://github.com/srawlin/overclock/actions/workflows/ci.yml/badge.svg)](https://github.com/srawlin/overclock/actions/workflows/ci.yml)
+
 ```
                                _            _
   ____ _   _____  _____    ___| | ___   ___| | __
@@ -97,6 +99,8 @@ npm run eval      # real-API task evals in test/eval (uses your key, burns token
 ```
 
 `npm run eval:fast` runs the eval suite with the `OVERCLOCK_FAST` preset enabled.
+
+CI runs typecheck + the unit/e2e suite on Ubuntu and macOS for every push to main/dev and every PR; the real-API eval is local-only.
 
 ## Layout
 

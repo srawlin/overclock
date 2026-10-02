@@ -12,6 +12,7 @@ Pi runtime rebranding lives in `scripts/postinstall.mjs` (npm postinstall): it w
 2. `bun typecheck` — `tsc --noEmit`, must be clean.
 3. Commit on `dev` with a conventional message (`fix(overclock):`, `feat(overclock):`, `test:`, `docs:`, `chore:`).
 4. `git push origin dev`.
+5. After pushing, CI must be green — check with `gh run list --branch dev --limit 1` or `gh run watch`.
 
 `npm run eval` (`node test/eval/run.mjs`) is the deeper real-API task eval — uses the caller's Cerebras key and burns tokens; run when the change could affect agent behavior or speed, not for every commit.
 
