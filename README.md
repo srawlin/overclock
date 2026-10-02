@@ -28,7 +28,7 @@ overclock is a thin extension on top of [`pi-coding-agent`](https://github.com/e
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/srawlin/overclock/dev/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/srawlin/overclock/main/install.sh | bash
 ```
 
 The installer clones to `~/.local/share/overclock`, links `overclock` into `~/.local/bin`, and prompts for your [Cerebras API key](https://cloud.cerebras.ai). Requires Node ≥ 22.19 and git.
